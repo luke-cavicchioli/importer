@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "importer"
+authors = [
+    { name = "Luca Cavicchioli", email = "lucavicchioli8@gmail.com"},
+]
+description = "Import experimental files from remote computer"
+readme = "README.md"
+requires-python = ">=3.11.7"
+dependencies = [
+    "sh",
+    "click",
+    "rich",
+]
+version = "0.0.1"
+
+[project.scripts]
+importer = "importer:main"
