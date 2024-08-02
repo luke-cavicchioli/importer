@@ -17,4 +17,4 @@ live:
     watchexec --workdir ./ -prc -- just _live_cmd
 
 _live_cmd:
-    importer 
+    importer --today --inpath="./"

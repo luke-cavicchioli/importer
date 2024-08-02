@@ -1,6 +1,7 @@
 """Main function of the program."""
 
 import pathlib
+import warnings
 from datetime import date
 
 import click
@@ -16,6 +17,25 @@ CONTEXT_SETTINGS = {
     "default_map": defaults.default_map,
     "terminal_width": termw
 }
+
+
+def handle_today_arg(kwargs):
+    """Sets the datepath if today is set."""
+
+    if not kwargs["today"]:
+        return kwargs
+
+    if kwargs["datepath"] is not None:
+        warnings.warn("--today will override --date")
+    if kwargs["inpath"] is not None:
+        warnings.warn("--today will override --inpath")
+
+    newargs = kwargs.copy()
+    newargs.update({
+        "datepath": date.today(),
+        "inpath": None
+    })
+    return newargs
 
 
 @click.group(
@@ -53,6 +73,16 @@ CONTEXT_SETTINGS = {
     type=pathlib.Path,
     help="Output directory.",
     show_default=True,
+)
+@click.option(
+    "-r",
+    "--repopath",
+    "repopath",
+    default=None,
+    type=pathlib.Path,
+    help="Path of data repository",
+    envvar="IMPORTER_REPOPATH",
+    show_envvar=True
 )
 @click.option(
     "--mountpoint",
@@ -100,6 +130,7 @@ CONTEXT_SETTINGS = {
 def main(ctx, **kwargs):
     """Program entry point."""
     cns.rule("IMPORTER")
+    kwargs = handle_today_arg(kwargs)
     cns.print("Args:")
     cns.print(kwargs)
 
