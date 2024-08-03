@@ -1,20 +1,39 @@
 """Main function of the program."""
 
+import logging
 import pathlib
 import warnings
 from datetime import date
 
 import click
-import rich.console as rconsole
-
-from . import defaults
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.pretty import pretty_repr
 
 termw = 80
 
-cns = rconsole.Console(width=termw)
+cns = Console(width=termw)
+
+log_handler = RichHandler(
+    console=cns,
+    show_path=False,
+)
+logger = logging.getLogger(__name__)
+logger.addHandler(log_handler)
+logging.captureWarnings(True)
+
+
+def formatwarning(message, category, filename, lineno, line=None) -> str:
+    """Custom formatting for warnings."""
+    return str(message)
+
+
+warnings.formatwarning = formatwarning
+warn_logger = logging.getLogger("py.warnings")
+warn_logger.addHandler(log_handler)
+
 
 CONTEXT_SETTINGS = {
-    "default_map": defaults.default_map,
     "terminal_width": termw
 }
 
@@ -36,6 +55,16 @@ def handle_today_arg(kwargs):
         "inpath": None
     })
     return newargs
+
+
+def set_verbosity(level: int):
+    """Set the correct verbosity level."""
+    if level <= 0:
+        logger.setLevel(logging.WARNING)
+    elif level == 1:
+        logger.setlevel(logging.INFO)
+    elif level >= 2:
+        logger.setLevel(logging.DEBUG)
 
 
 @click.group(
@@ -129,9 +158,10 @@ def handle_today_arg(kwargs):
 @click.pass_context
 def main(ctx, **kwargs):
     """Program entry point."""
+    set_verbosity(kwargs["verbose"])
     cns.rule("IMPORTER")
+    logger.debug(f"Invoked subcommand: {ctx.invoked_subcommand}")
     kwargs = handle_today_arg(kwargs)
-    cns.print("Args:")
-    cns.print(kwargs)
+    logger.debug(pretty_repr(kwargs))
 
     cns.rule()
