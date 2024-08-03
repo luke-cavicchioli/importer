@@ -4,31 +4,30 @@
 #
 #    pip-compile --output-file=requirements.txt pyproject.toml
 #
-annotated-types==0.7.0
-    # via pydantic
 click==8.1.7
     # via importer (pyproject.toml)
-markdown-it-py==3.0.0
-    # via rich
+linkify-it-py==2.0.3
+    # via markdown-it-py
+markdown-it-py[linkify,plugins]==3.0.0
+    # via
+    #   mdit-py-plugins
+    #   rich
+    #   textual
+mdit-py-plugins==0.4.1
+    # via markdown-it-py
 mdurl==0.1.2
     # via markdown-it-py
-pydantic==2.8.2
-    # via
-    #   importer (pyproject.toml)
-    #   pydantic-settings
-pydantic-core==2.20.1
-    # via pydantic
-pydantic-settings==2.4.0
-    # via importer (pyproject.toml)
 pygments==2.18.0
     # via rich
-python-dotenv==1.0.1
-    # via pydantic-settings
 rich==13.7.1
-    # via importer (pyproject.toml)
+    # via
+    #   importer (pyproject.toml)
+    #   textual
 sh==2.0.7
     # via importer (pyproject.toml)
+textual==0.75.1
+    # via importer (pyproject.toml)
 typing-extensions==4.12.2
-    # via
-    #   pydantic
-    #   pydantic-core
+    # via textual
+uc-micro-py==1.0.3
+    # via linkify-it-py

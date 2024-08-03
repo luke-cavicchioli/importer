@@ -14,8 +14,7 @@ dependencies = [
     "sh",
     "click",
     "rich",
-    "pydantic",
-    "pydantic-settings"
+    "textual"
 ]
 version = "0.0.1"
 
