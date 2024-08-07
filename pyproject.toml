@@ -14,7 +14,8 @@ dependencies = [
     "sh",
     "click",
     "rich",
-    "textual"
+    "questionary",
+    "thefuzz"
 ]
 version = "0.0.1"
 

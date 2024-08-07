@@ -6,28 +6,23 @@
 #
 click==8.1.7
     # via importer (pyproject.toml)
-linkify-it-py==2.0.3
-    # via markdown-it-py
-markdown-it-py[linkify,plugins]==3.0.0
-    # via
-    #   mdit-py-plugins
-    #   rich
-    #   textual
-mdit-py-plugins==0.4.1
-    # via markdown-it-py
+markdown-it-py==3.0.0
+    # via rich
 mdurl==0.1.2
     # via markdown-it-py
+prompt-toolkit==3.0.36
+    # via questionary
 pygments==2.18.0
     # via rich
+questionary==2.0.1
+    # via importer (pyproject.toml)
+rapidfuzz==3.9.6
+    # via thefuzz
 rich==13.7.1
-    # via
-    #   importer (pyproject.toml)
-    #   textual
+    # via importer (pyproject.toml)
 sh==2.0.7
     # via importer (pyproject.toml)
-textual==0.75.1
+thefuzz==0.22.1
     # via importer (pyproject.toml)
-typing-extensions==4.12.2
-    # via textual
-uc-micro-py==1.0.3
-    # via linkify-it-py
+wcwidth==0.2.13
+    # via prompt-toolkit
