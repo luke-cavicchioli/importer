@@ -5,10 +5,11 @@ import ipaddress
 import logging
 import os
 import pathlib
+import shutil
 import sys
 import warnings
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 import click
 import questionary
@@ -87,7 +88,7 @@ def set_verbosity(level: int):
     if level <= 0:
         logger.setLevel(logging.WARNING)
     elif level == 1:
-        logger.setlevel(logging.INFO)
+        logger.setLevel(logging.INFO)
     elif level >= 2:
         logger.setLevel(logging.DEBUG)
 
@@ -188,6 +189,13 @@ def unmount_remote(mountpoint: Optional[str]):
         logger.debug("Skipping unmounting")
 
 
+def validate_dir(dir: str) -> Union[bool, str]:
+    if os.path.isdir(dir):
+        return True
+    else:
+        return "Not a directory"
+
+
 def get_inpath(root: Optional[str]) -> pathlib.Path:
     """Interactively get the input path."""
     root_path = None
@@ -201,36 +209,37 @@ def get_inpath(root: Optional[str]) -> pathlib.Path:
         message="Choose input path: ",
         default=str(root_path),
         only_directories=True,
+        validate=validate_dir
     ).ask()
     logger.debug(f"{ans = }")
 
-    if ans is None:
-        return root_path
-    else:
-        return pathlib.Path(ans)
+    return pathlib.Path(ans) if ans is not None else None
 
 
 def handle_datedir(kwargs):
+    """Find and select datedir, or abort selection."""
     datepath = kwargs["datepath"]
     inpath = kwargs["inpath"]
     mountpoint = kwargs["mountpoint"]
+    selected = None
 
     if mountpoint is None:
         mountpoint = os.getcwd()
     mountpoint = pathlib.Path(mountpoint)
 
     if datepath is not None:
-        if inpath is not None:
-            warnings.warn("date will override inpath")
         datepath = datetime.strptime(datepath, "%Y-%m-%d")
         with cns.status("Searching for matching directories"):
             found = find_datedir(datepath, mountpoint)
-        inpath = select_datedir(found)
+        selected = select_datedir(found)
+
+    if selected is not None:
+        datepath = selected
 
     newargs = kwargs.copy()
-    newargs.update({"inpath": inpath})
+    newargs.update({"inpath": inpath, "datepath": datepath})
 
-    return newargs
+    return (newargs, selected is not None)
 
 
 def filterscore_subdirs(dirpath, dirnames, target):
@@ -280,18 +289,98 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     return ans
 
 
-@click.group(
+def paths_good(kwargs: Dict) -> bool:
+    """Final check for the given input/output paths."""
+    inpath = pathlib.Path(kwargs["inpath"]).resolve()
+    if not inpath.is_dir():
+        logger.error(f"Specified input path {inpath} is not a directory.")
+        return False
+
+    outpath = kwargs["outpath"]
+    if not outpath.is_dir():
+        logger.error(f"Specified output path {outpath} is not a directory.")
+        return False
+
+    repopath = kwargs["repopath"]
+    if not repopath.is_dir():
+        logger.error(
+            f"Specified repository path {repopath} is not a directory.")
+        return False
+
+    return True
+
+
+def copy_tree(inpath, destpath, selected) -> int:
+    return 0
+
+
+def copy_files(kwargs: Dict) -> int:
+    """Copy the files to destination."""
+
+    if not paths_good(kwargs):
+        return 1
+
+    inpath = kwargs["inpath"].resolve()
+    outpath = kwargs["outpath"].resolve()
+    repopath = kwargs["repopath"].resolve()
+    destpath = repopath.joinpath(inpath.name).resolve()
+    logger.debug(f"{destpath = }")
+
+    ls = [x.path for x in os.scandir(inpath)]
+    choices = [questionary.Choice(x, checked=True) for x in ls]
+    selected = questionary.checkbox(
+        "Select files to copy:", choices=choices).ask()
+    logger.debug(f"{selected = }")
+
+    if len(selected) == 0:
+        logger.warning("No files selected for copy. Done.")
+        return 0
+
+    compress = kwargs["compress"]
+    if compress is None:
+        ans = questionary.confirm("Copy file to compressed archive?").ask()
+        compress = ans if ans is not None else False
+
+    if compress:
+        logger.error("TODO")
+    else:
+        ret = copy_tree(inpath, destpath, selected)
+        if ret != 0:
+            return ret
+
+    if outpath != repopath:
+        logger.debug("Symlinking to repository")
+        linkdest = outpath.joinpath(destpath.name).resolve()
+        linkdest_new = linkdest
+        i = 1
+        while linkdest_new.exists():
+            name = str(linkdest.name)
+            suffixes = ''.join(linkdest.suffixes)
+            basename = name.replace(suffixes, '')
+            newname = f"{basename}_{i}{suffixes}"
+            linkdest_new = linkdest_new.with_name(newname)
+            i += 1
+
+        linkdest = linkdest_new
+        logger.debug(f"{linkdest = }")
+
+        os.symlink(destpath, linkdest)
+
+    return 0
+
+
+@ click.group(
     help="Import files from a server.",
     invoke_without_command=True,
     context_settings=CONTEXT_SETTINGS,
 )
-@click.option(
+@ click.option(
     "--today",
     "today",
     is_flag=True,
     help="Import from the server a directory with today's date as a name.",
 )
-@click.option(
+@ click.option(
     "-d",
     "--date",
     "datepath",
@@ -299,7 +388,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     type=str,
     help="Import from the server a directory with this date as a name.",
 )
-@click.option(
+@ click.option(
     "-i",
     "--inpath",
     "inpath",
@@ -307,7 +396,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     type=pathlib.Path,
     help="Import from the server a directory with this name.",
 )
-@click.option(
+@ click.option(
     "-o",
     "--outpath",
     "outpath",
@@ -316,7 +405,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     help="Output directory.",
     show_default=True,
 )
-@click.option(
+@ click.option(
     "-r",
     "--repopath",
     "repopath",
@@ -326,7 +415,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     envvar="IMPORTER_REPOPATH",
     show_envvar=True
 )
-@click.option(
+@ click.option(
     "--mountpoint",
     "mountpoint",
     default=None,
@@ -335,7 +424,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     envvar="IMPORTER_MOUNTPOINT",
     show_envvar=True
 )
-@click.option(
+@ click.option(
     "--server-ip",
     "server_ip",
     default="127.0.0.1",
@@ -344,7 +433,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     show_envvar=True,
     show_default=True,
 )
-@click.option(
+@ click.option(
     "--server-check/--no-server-check",
     "server_check",
     is_flag=True,
@@ -354,15 +443,15 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     show_default=True,
     help="Check or skip remote ip."
 )
-@click.option(
+@ click.option(
     "--compress/--no-compress",
     "compress",
     is_flag=True,
-    default=False,
+    default=None,
     envvar="IMPORTER_COMPRESS",
     help="Compress imported folder"
 )
-@click.option(
+@ click.option(
     "-v",
     "--verbose",
     count=True,
@@ -370,16 +459,22 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
     help="Control verbosity level (repeat to increase).",
     show_default="WARNING"
 )
-@click.pass_context
-@main_handle_errors
+@ click.option(
+    "-f",
+    "--force",
+    "force",
+    is_flag=True,
+    default=False,
+    help="Copy folder even if it already exists at destination"
+)
+@ click.pass_context
+@ main_handle_errors
 def main(ctx, **kwargs):
     """Program entry point."""
 
     set_verbosity(kwargs["verbose"])
 
     logger.debug(f"{ctx.invoked_subcommand = }")
-
-    kwargs = handle_today_arg(kwargs)
     logger.debug(f"{kwargs = }")
 
     mountpoint = kwargs["mountpoint"]
@@ -405,14 +500,31 @@ def main(ctx, **kwargs):
     else:
         logger.info("No mountpoint specified.")
 
-    kwargs = handle_datedir(kwargs)
+    kwargs = handle_today_arg(kwargs)
+    kwargs, cancelled = handle_datedir(kwargs)
 
     inpath = kwargs["inpath"]
+    logger.debug(f"{inpath = }")
+    datepath = kwargs["datepath"]
+    logger.debug(f"{datepath = }")
+
+    is_inpath_needed = inpath is None and datepath is None and not cancelled
+    if is_inpath_needed:
+        inpath = get_inpath(mountpoint)
+
+    is_datepath_selected = inpath is None and datepath is not None
+    if is_datepath_selected:
+        inpath = datepath
+
+    ret = 0
     if inpath is not None:
-        pass
+        kwargs["inpath"] = mountpoint.joinpath(inpath)
+        ret = copy_files(kwargs)
     else:
-        cns.print("[bold yellow]No input path.")
+        logger.error("No input directory selected.")
+        ret = 1
 
-    unmount_remote(mountpoint)
+    with cns.status(f"Unmounting {mountpoint}"):
+        unmount_remote(mountpoint)
 
-    return 0
+    return ret
