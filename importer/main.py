@@ -16,7 +16,7 @@ import questionary
 import sh
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress
+from rich.progress import Progress, TaskID
 from rich.style import Style
 from thefuzz import fuzz
 
@@ -327,6 +327,16 @@ def make_unique_fname(fname: pathlib.Path) -> pathlib.Path:
     return fname_new
 
 
+def add_pbar_copyf(copyf, progress: Progress, task: TaskID):
+    """Add a progressbar to a copying function."""
+    def closure(*args, **kwargs):
+        inname = pathlib.Path(args[0]).name
+        progress.update(task, description=f"Copying {inname}", advance=1)
+        copyf(*args, **kwargs)
+
+    return closure
+
+
 def copy_tree(
     inpath: pathlib.Path,
     destpath: pathlib.Path,
@@ -361,10 +371,7 @@ def copy_tree(
     with Progress(console=cns, transient=True) as progress:
         task = progress.add_task("Copying file", total=nfiles)
 
-        def copy(*args, **kwargs):
-            inname = pathlib.Path(args[0]).name
-            progress.update(task, description=f"Copying {inname}", advance=1)
-            shutil.copy2(*args, **kwargs)
+        copy = add_pbar_copyf(shutil.copy2, progress, task)
 
         try:
             shutil.copytree(
