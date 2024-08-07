@@ -1,12 +1,12 @@
 """Main function of the program."""
 
-import glob
 import ipaddress
 import logging
 import os
 import pathlib
 import shutil
 import sys
+import time
 import warnings
 from datetime import date, datetime
 from typing import Dict, List, Optional, Union
@@ -16,6 +16,7 @@ import questionary
 import sh
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.progress import Progress
 from rich.style import Style
 from thefuzz import fuzz
 
@@ -326,7 +327,59 @@ def make_unique_fname(fname: pathlib.Path) -> pathlib.Path:
     return fname_new
 
 
-def copy_tree(inpath, destpath, selected) -> int:
+def copy_tree(
+    inpath: pathlib.Path,
+    destpath: pathlib.Path,
+    selected: List[str],
+    force: bool
+) -> int:
+    """Copy the selected files and folders, display a nice progress bar."""
+
+    nfiles = [0]
+
+    def countfiles(src, dest):
+        nfiles[0] += 1
+
+    ls = [x.name for x in os.scandir(inpath)]
+    ignored = set(ls) - set(pathlib.Path(x).name for x in selected)
+    ignored.add("*.sis")
+    logger.debug(f"{ignored = }")
+
+    ignore = shutil.ignore_patterns(*ignored)
+
+    shutil.copytree(
+        inpath,
+        destpath,
+        dirs_exist_ok=True,
+        copy_function=countfiles,
+        ignore=ignore
+    )
+
+    nfiles = nfiles[0]
+    logger.debug(f"{nfiles = }")
+
+    with Progress(console=cns, transient=True) as progress:
+        task = progress.add_task("Copying file", total=nfiles)
+
+        def copy(*args, **kwargs):
+            inname = pathlib.Path(args[0]).name
+            progress.update(task, description=f"Copying {inname}", advance=1)
+            shutil.copy2(*args, **kwargs)
+
+        try:
+            shutil.copytree(
+                inpath,
+                destpath,
+                dirs_exist_ok=force,
+                copy_function=copy,
+                ignore=ignore
+            )
+        except FileExistsError as e:
+            logger.error(e)
+            return 1
+
+    cns.print("[bold yellow]Done")
+
     return 0
 
 
@@ -360,7 +413,8 @@ def copy_files(kwargs: Dict) -> int:
     if compress:
         logger.error("TODO")
     else:
-        ret = copy_tree(inpath, destpath, selected)
+        force = kwargs["force"]
+        ret = copy_tree(inpath, destpath, selected, force)
         if ret != 0:
             return ret
 
