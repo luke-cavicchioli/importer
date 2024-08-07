@@ -310,6 +310,22 @@ def paths_good(kwargs: Dict) -> bool:
     return True
 
 
+def make_unique_fname(fname: pathlib.Path) -> pathlib.Path:
+    """Append a numerical suffix to render a filename unique."""
+    fname_new = fname
+    i = 1
+    while fname_new.exists() or fname_new.is_symlink():
+        name = str(fname.name)
+        suffixes = ''.join(fname.suffixes)
+        basename = name.replace(suffixes, '')
+        newname = f"{basename}_{i}{suffixes}"
+        fname_new = fname_new.with_name(newname)
+        i += 1
+
+    logger.debug(f"{fname_new = }")
+    return fname_new
+
+
 def copy_tree(inpath, destpath, selected) -> int:
     return 0
 
@@ -349,21 +365,10 @@ def copy_files(kwargs: Dict) -> int:
             return ret
 
     if outpath != repopath:
-        logger.debug("Symlinking to repository")
-        linkdest = outpath.joinpath(destpath.name).resolve()
-        linkdest_new = linkdest
-        i = 1
-        while linkdest_new.exists():
-            name = str(linkdest.name)
-            suffixes = ''.join(linkdest.suffixes)
-            basename = name.replace(suffixes, '')
-            newname = f"{basename}_{i}{suffixes}"
-            linkdest_new = linkdest_new.with_name(newname)
-            i += 1
+        linkdest = outpath.joinpath(destpath.name).absolute()
+        linkdest = make_unique_fname(linkdest)
 
-        linkdest = linkdest_new
-        logger.debug(f"{linkdest = }")
-
+        logger.debug(f"{destpath = }, {linkdest = }")
         os.symlink(destpath, linkdest)
 
     return 0
