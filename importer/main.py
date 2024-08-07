@@ -6,8 +6,9 @@ import os
 import pathlib
 import shutil
 import sys
-import time
+import tempfile
 import warnings
+import zipfile
 from datetime import date, datetime
 from typing import Dict, List, Optional, Union
 
@@ -337,17 +338,23 @@ def add_pbar_copyf(copyf, progress: Progress, task: TaskID):
     return closure
 
 
+def do_nothing(*args, **kwargs):
+    """Do nothing function, don't copy anything."""
+    # logger.debug(f"{args =}, {kwargs = }")
+
+
 def copy_tree(
     inpath: pathlib.Path,
     destpath: pathlib.Path,
     selected: List[str],
-    force: bool
+    force: bool,
+    copyf=shutil.copy2
 ) -> int:
     """Copy the selected files and folders, display a nice progress bar."""
 
     nfiles = [0]
 
-    def countfiles(src, dest):
+    def countfiles(*_):
         nfiles[0] += 1
 
     ls = [x.name for x in os.scandir(inpath)]
@@ -357,13 +364,15 @@ def copy_tree(
 
     ignore = shutil.ignore_patterns(*ignored)
 
+    tempdir = tempfile.TemporaryDirectory()
     shutil.copytree(
         inpath,
-        destpath,
-        dirs_exist_ok=True,
+        tempdir.name,
         copy_function=countfiles,
+        dirs_exist_ok=True,
         ignore=ignore
     )
+    tempdir.cleanup()
 
     nfiles = nfiles[0]
     logger.debug(f"{nfiles = }")
@@ -371,16 +380,17 @@ def copy_tree(
     with Progress(console=cns, transient=True) as progress:
         task = progress.add_task("Copying file", total=nfiles)
 
-        copy = add_pbar_copyf(shutil.copy2, progress, task)
+        nice_copyf = add_pbar_copyf(copyf, progress, task)
 
         try:
             shutil.copytree(
                 inpath,
                 destpath,
                 dirs_exist_ok=force,
-                copy_function=copy,
+                copy_function=nice_copyf,
                 ignore=ignore
             )
+            pass
         except FileExistsError as e:
             logger.error(e)
             return 1
@@ -400,30 +410,54 @@ def copy_files(kwargs: Dict) -> int:
     outpath = kwargs["outpath"].resolve()
     repopath = kwargs["repopath"].resolve()
     destpath = repopath.joinpath(inpath.name).resolve()
-    logger.debug(f"{destpath = }")
+    force = kwargs["force"]
+    compress = kwargs["compress"]
+
+    if destpath.exists():
+        if force:
+            logger.info(
+                f"{destpath.absolute()} exists, it will be overwritten."
+            )
+        else:
+            logger.error(
+                f"{destpath.absolute()} exists. Use --force to overwrite."
+            )
+            return 1
 
     ls = [x.path for x in os.scandir(inpath)]
     choices = [questionary.Choice(x, checked=True) for x in ls]
     selected = questionary.checkbox(
         "Select files to copy:", choices=choices).ask()
-    logger.debug(f"{selected = }")
 
     if len(selected) == 0:
         logger.warning("No files selected for copy. Done.")
         return 0
 
-    compress = kwargs["compress"]
     if compress is None:
         ans = questionary.confirm("Copy file to compressed archive?").ask()
         compress = ans if ans is not None else False
 
-    if compress:
-        logger.error("TODO")
-    else:
-        force = kwargs["force"]
-        ret = copy_tree(inpath, destpath, selected, force)
-        if ret != 0:
-            return ret
+    copyf = do_nothing if compress else shutil.copy2
+    destpath = destpath.with_suffix(".zip") if compress else destpath
+
+    copydir = tempfile.TemporaryDirectory(dir=repopath)
+    copypath = pathlib.Path(copydir.name)
+
+    logger.debug(f"{inpath = }")
+    logger.debug(f"{destpath = }")
+    logger.debug(f"{selected = }")
+    logger.debug(f"{force = }")
+    logger.debug(f"{compress = }")
+    logger.debug(f"{copypath = }")
+
+    ret = copy_tree(inpath, copypath, selected, force, copyf)
+    ret = 0
+    if ret != 0:
+        return ret
+
+    if not compress:
+        os.rename(copypath, destpath)
+    copydir.cleanup()
 
     if outpath != repopath:
         linkdest = outpath.joinpath(destpath.name).absolute()
