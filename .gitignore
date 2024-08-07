@@ -155,4 +155,4 @@ dmypy.json
 cython_debug/
 
 # Test repository
-test_repopath
+test_repo
