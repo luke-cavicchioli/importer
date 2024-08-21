@@ -230,9 +230,9 @@ def handle_datedir(kwargs):
     mountpoint = pathlib.Path(mountpoint)
 
     if datepath is not None:
-        datepath = datetime.strptime(datepath, "%Y-%m-%d")
+        searchdate = datetime.strptime(f"{datepath}-13", "%Y-%m-%d-%H")
         with cns.status("Searching for matching directories"):
-            found = find_datedir(datepath, mountpoint)
+            found = find_datedir(searchdate, mountpoint)
         selected = select_datedir(found)
 
     if selected is not None:
@@ -241,41 +241,41 @@ def handle_datedir(kwargs):
     newargs = kwargs.copy()
     newargs.update({"inpath": inpath, "datepath": datepath})
 
-    return (newargs, selected is not None)
+    return (newargs, selected is None)
 
 
-def filterscore_subdirs(dirpath, dirnames, target):
-    """Sort and filter the subdirectories according to score."""
-    dirnames = sorted(
-        dirnames,
-        key=lambda x: fuzz.partial_ratio(str(x), target),
-        reverse=True
-    )
-    subdirs = [pathlib.Path(dirpath).joinpath(d) for d in dirnames]
-    scores = [(s, fuzz.partial_ratio(str(s), target)) for s in subdirs]
-    curr_score = fuzz.partial_ratio(str(dirpath), target)
-    return [s[0] for s in scores if s[1] > curr_score]
+def datescore_dir(dir: pathlib.Path, target: datetime) -> int:
+    mtime = datetime.fromtimestamp(os.stat(dir).st_mtime)
+    delta = mtime - target
+    return abs(int(delta.total_seconds()))
 
 
 def find_datedir(date: datetime, root: pathlib.Path, n=10) -> List[pathlib.Path]:
     """Find best matching directories in the root path."""
-    target = date.strftime("%Y %m %d")
-    logger.debug(f"{target = }")
     found = []
 
-    for dirpath, dirnames, _ in os.walk(root):
+    for curr, subdns, _ in os.walk(root):
+        # append current directory if none visited
+        if len(found) == 0:
+            found.append((curr, pathlib.Path(curr), datescore_dir(curr, date)))
 
-        dirnames[:] = filterscore_subdirs(dirpath, dirnames, target)
+        # find scores for all sub-directories
+        subdps = [(d, pathlib.Path(curr).joinpath(d).resolve())
+                  for d in subdns]
+        subdss = [(d, p, datescore_dir(p, date)) for d, p in subdps]
 
-        if len(dirnames) == 0:
-            found.append(dirpath)
-            logger.debug(f"Appending to found: {dirpath}")
+        # keep only subdss members that would be in top ten
+        subdss.sort(key=lambda x: x[2])
+        found[:] = found + subdss
+        found.sort(key=lambda x: x[2])
+        found[:] = found[:min(len(found), n)]
+        max_found = found[-1][2]
+        subdss[:] = [(d, s) for d, _, s in subdss if s <= max_found]
 
-        if len(found) >= n:
-            break
+        # traverse only subdirectories in subdss (i.e. directories in top ten)
+        subdns[:] = [d for d, _ in subdss]
 
-    found = [pathlib.Path(p) for p in found]
-
+    found = [str(x[1]) for x in found]
     return found
 
 
@@ -400,72 +400,8 @@ def copy_tree(
     return 0
 
 
-def copy_files(kwargs: Dict) -> int:
+def process_files(kwargs: Dict) -> int:
     """Copy the files to destination."""
-
-    if not paths_good(kwargs):
-        return 1
-
-    inpath = kwargs["inpath"].resolve()
-    outpath = kwargs["outpath"].resolve()
-    repopath = kwargs["repopath"].resolve()
-    destpath = repopath.joinpath(inpath.name).resolve()
-    force = kwargs["force"]
-    compress = kwargs["compress"]
-
-    if destpath.exists():
-        if force:
-            logger.info(
-                f"{destpath.absolute()} exists, it will be overwritten."
-            )
-        else:
-            logger.error(
-                f"{destpath.absolute()} exists. Use --force to overwrite."
-            )
-            return 1
-
-    ls = [x.path for x in os.scandir(inpath)]
-    choices = [questionary.Choice(x, checked=True) for x in ls]
-    selected = questionary.checkbox(
-        "Select files to copy:", choices=choices).ask()
-
-    if len(selected) == 0:
-        logger.warning("No files selected for copy. Done.")
-        return 0
-
-    if compress is None:
-        ans = questionary.confirm("Copy file to compressed archive?").ask()
-        compress = ans if ans is not None else False
-
-    copyf = do_nothing if compress else shutil.copy2
-    destpath = destpath.with_suffix(".zip") if compress else destpath
-
-    copydir = tempfile.TemporaryDirectory(dir=repopath)
-    copypath = pathlib.Path(copydir.name)
-
-    logger.debug(f"{inpath = }")
-    logger.debug(f"{destpath = }")
-    logger.debug(f"{selected = }")
-    logger.debug(f"{force = }")
-    logger.debug(f"{compress = }")
-    logger.debug(f"{copypath = }")
-
-    ret = copy_tree(inpath, copypath, selected, force, copyf)
-    ret = 0
-    if ret != 0:
-        return ret
-
-    if not compress:
-        os.rename(copypath, destpath)
-    copydir.cleanup()
-
-    if outpath != repopath:
-        linkdest = outpath.joinpath(destpath.name).absolute()
-        linkdest = make_unique_fname(linkdest)
-
-        logger.debug(f"{destpath = }, {linkdest = }")
-        os.symlink(destpath, linkdest)
-
     return 0
 
 
@@ -607,6 +543,7 @@ def main(ctx, **kwargs):
     logger.debug(f"{inpath = }")
     datepath = kwargs["datepath"]
     logger.debug(f"{datepath = }")
+    logger.debug(f"{cancelled = }")
 
     is_inpath_needed = inpath is None and datepath is None and not cancelled
     if is_inpath_needed:
@@ -619,7 +556,8 @@ def main(ctx, **kwargs):
     ret = 0
     if inpath is not None:
         kwargs["inpath"] = mountpoint.joinpath(inpath)
-        ret = copy_files(kwargs)
+        ret = process_files(kwargs)
+
     else:
         logger.error("No input directory selected.")
         ret = 1
