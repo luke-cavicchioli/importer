@@ -21,9 +21,10 @@ import sh
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, TaskID
+from rich.status import Status
 from rich.style import Style
 
-from .remote import RemoteRepo
+from .remote import RemoteRepo, StatusCB
 
 termw = 80
 
@@ -177,66 +178,45 @@ def main(ctx, **kwargs):
     logger.debug(f"{ctx.invoked_subcommand = }")
     logger.debug(f"{kwargs = }")
 
-    mountpoint = kwargs["mountpoint"]
-    server_ip = kwargs["server_ip"]
+    remote = build_remote_repo(kwargs)
+    logger.debug(f"{remote = }")
 
-    # TODO: move to function
-    if mountpoint is not None:
-        try:
-            server_ip = ipaddress.ip_address(server_ip)
-        except ValueError as e:
-            logger.error(f"server_ip value {e}")
-            return 1
-        logger.debug(f"{server_ip = }")
+    # kwargs = handle_today_arg(kwargs)
+    # kwargs, cancelled = handle_datedir(kwargs)
+    # logger.debug(f"{cancelled = }")
+    #
+    # inpath = kwargs["inpath"]
+    # logger.debug(f"{inpath = }")
+    # datepath = kwargs["datepath"]
+    # logger.debug(f"{datepath = }")
+    #
+    # # If there was no input, Interactively get the input path.
+    # # Test for cancelled is needed, as otherwise would want inpath if user
+    # # cancels datedir selection with C-c
+    # is_inpath_needed = inpath is None and datepath is None and not cancelled
+    # if is_inpath_needed:
+    #     inpath = get_inpath(mountpoint)
+    #
+    # # Put datepath into inpath if there was no inpath given, and datepath was
+    # # given
+    # is_datepath_selected = inpath is None and datepath is not None
+    # if is_datepath_selected:
+    #     inpath = datepath
+    #
+    # # Because now remote is mounted, return code needs to be given from
+    # # process files, otherwise no unmounting.
+    # ret = 0
+    # if inpath is not None:
+    #     kwargs["inpath"] = mountpoint.joinpath(inpath)
+    #     ret = process_files(kwargs)
+    # else:
+    #     logger.error("No input directory selected.")
+    #     ret = 1
+    #
+    # with cns.status(f"Unmounting {mountpoint}"):
+    #     unmount_remote(mountpoint)
 
-        with cns.status("Checking remote server"):
-            server_ok = ping_server(kwargs["server_check"], server_ip)
-
-        if not server_ok:
-            logger.error("Could not connect to server. Exiting.")
-            return 1
-
-        with cns.status("Mounting remote repository"):
-            mount_remote(mountpoint)
-    else:
-        logger.info("No mountpoint specified.")
-
-    kwargs = handle_today_arg(kwargs)
-    kwargs, cancelled = handle_datedir(kwargs)
-    logger.debug(f"{cancelled = }")
-
-    inpath = kwargs["inpath"]
-    logger.debug(f"{inpath = }")
-    datepath = kwargs["datepath"]
-    logger.debug(f"{datepath = }")
-
-    # If there was no input, Interactively get the input path.
-    # Test for cancelled is needed, as otherwise would want inpath if user
-    # cancels datedir selection with C-c
-    is_inpath_needed = inpath is None and datepath is None and not cancelled
-    if is_inpath_needed:
-        inpath = get_inpath(mountpoint)
-
-    # Put datepath into inpath if there was no inpath given, and datepath was
-    # given
-    is_datepath_selected = inpath is None and datepath is not None
-    if is_datepath_selected:
-        inpath = datepath
-
-    # Because now remote is mounted, return code needs to be given from
-    # process files, otherwise no unmounting.
-    ret = 0
-    if inpath is not None:
-        kwargs["inpath"] = mountpoint.joinpath(inpath)
-        ret = process_files(kwargs)
-    else:
-        logger.error("No input directory selected.")
-        ret = 1
-
-    with cns.status(f"Unmounting {mountpoint}"):
-        unmount_remote(mountpoint)
-
-    return ret
+    return 0
 
 
 def handle_today_arg(kwargs):
@@ -272,6 +252,40 @@ def set_verbosity(level: int):
     if "IMPORTER_DEBUG" in os.environ.keys():
         logger.setLevel(logging.DEBUG)
         logger.debug("Logging level set to debug via envvar IMPORTER_DEBUG.")
+
+
+def build_remote_repo(kwargs):
+    """Build the remote repository manager instance."""
+
+    mountpoint = kwargs["mountpoint"]
+    server_ip = kwargs["server_ip"]
+    server_check = kwargs["server_check"]
+
+    try:
+        mountpoint = pathlib.Path(mountpoint)
+    except Exception as e:
+        logger.error(e)
+        return 1
+
+    try:
+        server_ip = ipaddress.ip_address(server_ip)
+    except Exception as e:
+        logger.error(e)
+        return 1
+
+    ck_status = Status("Checking remote server.")
+    ck_st_cb = StatusCB(start=ck_status.start, stop=ck_status.stop)
+
+    mnt_status = Status("Mounting remote repo.")
+    mnt_st_cb = StatusCB(start=mnt_status.start, stop=mnt_status.stop)
+
+    return RemoteRepo(
+        mountpoint=mountpoint,
+        server_ip=server_ip,
+        server_ck=server_check,
+        ck_st_cb=ck_st_cb,
+        mnt_st_cb=mnt_st_cb,
+    )
 
 
 def ping_server(flag: bool, ip: str) -> bool:
