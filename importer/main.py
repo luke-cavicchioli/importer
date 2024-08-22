@@ -25,6 +25,7 @@ from rich.progress import Progress, TaskID
 from rich.status import Status
 from rich.style import Style
 
+from .fileproc import FileProcessor
 from .inputdir import InputDIR
 from .remote import RemoteRepo
 from .statuscb import StatusCB
@@ -360,14 +361,16 @@ def process(indir, outpath, repopath, compress, force) -> int:
         repopath=repopath,
         compress=compress,
         force=force,
+        ignore_patterns=["*.sis"]
     )
 
     nfiles = proc.count_files()
+    logger.info(f"There are {nfiles} files to process.")
     pbar = Progress()
-    ctask = pbar.add_task(total=nfiles)
+    ctask = pbar.add_task(total=nfiles, description="Processing files:")
 
     def pbar_upd(filename):
-        pbar.update(ctask, description=f"Copying {filename}", advance=1)
+        pbar.update(ctask, description=f"{filename}", advance=1)
 
     ret = proc.copy(cb=pbar_upd)
 
