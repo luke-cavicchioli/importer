@@ -1,9 +1,10 @@
+"""Manage the remote repository."""
 import logging
 import warnings
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from subprocess import CompletedProcess, run
-from typing import Callable, Optional, ParamSpecArgs, Union
+from typing import Callable, Optional, Union
 
 logger = logging.getLogger("importer.remote")
 
@@ -13,26 +14,31 @@ LOCALHOST = ip_address("127.0.0.1")
 
 
 class StatusCB:
+    """Callbacks for displaying a status line during long operations."""
 
     def NOP():
+        """Do nothing."""
         return None
 
     def __init__(self,
                  start: Callable[[None], None] = NOP,
                  stop: Callable[[None], None] = NOP
                  ):
+        """Specify the start and stop callables."""
         self._start = staticmethod(start)
         self._stop = staticmethod(stop)
 
     def start(self):
-        self._start
+        """Call start function."""
+        self._start()
 
     def stop(self):
-        self._stop
+        """Call stop function."""
+        self._stop()
 
 
 class RemoteRepo:
-    """Class that represents the remote repository mountpoint."""
+    """Remote repository as context."""
 
     def __init__(
         self,
@@ -43,6 +49,9 @@ class RemoteRepo:
         mnt_st_cb: StatusCB = StatusCB()
     ):
         self._mountpoint = mountpoint
+        if self._mountpoint is None:
+            logger.info("No mountpoint specified.")
+            self._passthrough = True
         self._server_ip = ip_address(server_ip)
         self._server_ck = server_ck
         self._ck_st_cb = ck_st_cb
@@ -58,7 +67,10 @@ class RemoteRepo:
 
         return self._server_ck
 
-    def __enter__(self) -> Union[Path, Exception]:
+    def __enter__(self) -> Optional[Union[Path, Exception]]:
+        if self._passthrough:
+            return None
+
         if self._ip_ck_needed():
             self._ck_st_cb.start()
             ip_good, msg = self._ip_ck()
@@ -86,7 +98,8 @@ class RemoteRepo:
         logger.debug(
             f"Exiting: {exc_type = }\n{exc_value = }\n{traceback = }")
 
-        self._umnt()
+        if not self._passthrough:
+            self._umnt()
 
         return False
 
@@ -97,13 +110,14 @@ class RemoteRepo:
             return (True, "No check was performed")
 
     def _mnt(self) -> tuple[bool, str]:
-        pass
+        return mount_remote(self._mountpoint)
 
     def _umnt(self) -> tuple[bool, str]:
-        pass
+        return unmount_remote(self._mountpoint)
 
 
 def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0):
+    """Ping the specified IP address"""
     addrstr = str(addr)
     n = int(npkgs)
     t = float(timeout)
@@ -126,6 +140,7 @@ def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0):
 
 
 def parse_ping_res(ret: CompletedProcess) -> str:
+    """Parse the response of the ping command."""
     stdout = ret.stdout.decode("utf-8")
     status_msg = stdout.split("\n")
 
@@ -145,3 +160,31 @@ def parse_ping_res(ret: CompletedProcess) -> str:
     time_str = f"Ping ({unit}): min {tmin}, max {tmax}"
 
     return f"Server check for {ip}:\n\t{loss_str}\n\t{time_str}"
+
+
+def mount_remote(mountpoint: Path) -> tuple[bool, str]:
+    """Mount remote directory to specified mountpoint."""
+    logger.debug(f"{mountpoint = }")
+    path = str(mountpoint)
+
+    ret = run(["mountpoint", path, "-q"], capture_output=True)
+    if ret.returncode == 0:
+        return (True, f"{path} is already mounted.")
+
+    ret = run(["mount", path], capture_output=True)
+    if ret.returncode == 0:
+        return (True, f"Mount of {path} successful.")
+    else:
+        return (False, ret.stderr.decode("utf-8"))
+
+
+def unmount_remote(mountpoint: Path) -> tuple[bool, str]:
+    """Unmount specified directory."""
+    logger.debug(f"{mountpoint = }")
+    path = str(mountpoint)
+
+    ret = run(["umount", path], capture_output=True)
+    if ret == 0:
+        return (True, "Unmount successful")
+    else:
+        return (False, ret.stderr.decode("utf8"))
