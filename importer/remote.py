@@ -20,7 +20,7 @@ class RemoteRepo:
 
     def __init__(
         self,
-        mountpoint: Path = Path("."),
+        mountpoint: Optional[Path] = Path("."),
         server_ip: IPAddr = LOCALHOST,
         server_ck: Optional[bool] = None,
         ck_st_cb:  StatusCB = StatusCB(),

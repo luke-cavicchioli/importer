@@ -24,6 +24,7 @@ from rich.progress import Progress, TaskID
 from rich.status import Status
 from rich.style import Style
 
+from .inputdir import InputDIR
 from .remote import RemoteRepo
 from .statuscb import StatusCB
 
@@ -180,6 +181,8 @@ def main(ctx, **kwargs):
     logger.debug(f"{kwargs = }")
 
     remote_repo = build_remote_repo(kwargs)
+    if remote_repo is None:
+        return 1
 
     with remote_repo as rem:
         if isinstance(rem, Exception):
@@ -188,62 +191,15 @@ def main(ctx, **kwargs):
 
         logger.debug(f"{rem = }")
 
-    a = 1
-    # kwargs = handle_today_arg(kwargs)
-    # kwargs, cancelled = handle_datedir(kwargs)
-    # logger.debug(f"{cancelled = }")
-    #
-    # inpath = kwargs["inpath"]
-    # logger.debug(f"{inpath = }")
-    # datepath = kwargs["datepath"]
-    # logger.debug(f"{datepath = }")
-    #
-    # # If there was no input, Interactively get the input path.
-    # # Test for cancelled is needed, as otherwise would want inpath if user
-    # # cancels datedir selection with C-c
-    # is_inpath_needed = inpath is None and datepath is None and not cancelled
-    # if is_inpath_needed:
-    #     inpath = get_inpath(mountpoint)
-    #
-    # # Put datepath into inpath if there was no inpath given, and datepath was
-    # # given
-    # is_datepath_selected = inpath is None and datepath is not None
-    # if is_datepath_selected:
-    #     inpath = datepath
-    #
-    # # Because now remote is mounted, return code needs to be given from
-    # # process files, otherwise no unmounting.
-    # ret = 0
-    # if inpath is not None:
-    #     kwargs["inpath"] = mountpoint.joinpath(inpath)
-    #     ret = process_files(kwargs)
-    # else:
-    #     logger.error("No input directory selected.")
-    #     ret = 1
-    #
-    # with cns.status(f"Unmounting {mountpoint}"):
-    #     unmount_remote(mountpoint)
+        indir = get_input_directory(kwargs)
+
+        if indir is None:
+            logger.error("No input directory selected.")
+            return 1
+
+        logger.debug(f"{indir = }")
 
     return 0
-
-
-def handle_today_arg(kwargs):
-    """Sets the datepath if today is set."""
-
-    if not kwargs["today"]:
-        return kwargs
-
-    if kwargs["datepath"] is not None:
-        warnings.warn("--today will override --date")
-    if kwargs["inpath"] is not None:
-        warnings.warn("--today will override --inpath")
-
-    newargs = kwargs.copy()
-    newargs.update({
-        "datepath": date.today().strftime("%Y-%m-%d"),
-        "inpath": None
-    })
-    return newargs
 
 
 def set_verbosity(level: int):
@@ -262,24 +218,25 @@ def set_verbosity(level: int):
         logger.debug("Logging level set to debug via envvar IMPORTER_DEBUG.")
 
 
-def build_remote_repo(kwargs):
+def build_remote_repo(kwargs) -> Optional[RemoteRepo]:
     """Build the remote repository manager instance."""
 
     mountpoint = kwargs["mountpoint"]
     server_ip = kwargs["server_ip"]
     server_check = kwargs["server_check"]
 
-    try:
-        mountpoint = pathlib.Path(mountpoint)
-    except Exception as e:
-        logger.error(e)
-        return 1
+    if mountpoint is not None:
+        try:
+            mountpoint = pathlib.Path(mountpoint)
+        except Exception as e:
+            logger.error(e)
+            return
 
     try:
         server_ip = ipaddress.ip_address(server_ip)
     except Exception as e:
         logger.error(e)
-        return 1
+        return
 
     ck_status = Status("Checking remote server.")
     ck_st_cb = StatusCB(start=ck_status.start, stop=ck_status.stop)
@@ -296,104 +253,48 @@ def build_remote_repo(kwargs):
     )
 
 
-def validate_dir(dir: str) -> Union[bool, str]:
-    if os.path.isdir(dir):
-        return True
-    else:
-        return "Not a directory"
+def get_input_directory(kwargs) -> Optional[pathlib.Path]:
+    """Get the path for the input directory."""
 
-
-def get_inpath(root: Optional[str]) -> pathlib.Path:
-    """Interactively get the input path."""
-    root_path = None
-    if root is None:
-        root_path = pathlib.Path("./").resolve()
-    else:
-        root_path = pathlib.Path(root).resolve()
-    logger.debug(f"{root_path = }")
-
-    ans = questionary.path(
-        message="Choose input path: ",
-        default=str(root_path),
-        only_directories=True,
-        validate=validate_dir
-    ).ask()
-    logger.debug(f"{ans = }")
-
-    return pathlib.Path(ans) if ans is not None else None
-
-
-def handle_datedir(kwargs):
-    """Find and select datedir, or abort selection."""
+    today = kwargs["today"]
     datepath = kwargs["datepath"]
     inpath = kwargs["inpath"]
     mountpoint = kwargs["mountpoint"]
-    selected = None
-
-    if mountpoint is None:
-        mountpoint = os.getcwd()
-    mountpoint = pathlib.Path(mountpoint)
 
     if datepath is not None:
-        searchdate = datetime.strptime(f"{datepath}-13", "%Y-%m-%d-%H")
-        with cns.status("Searching for matching directories"):
-            found = find_datedir(searchdate, mountpoint)
-        selected = select_datedir(found)
+        try:
+            datepath = datetime.strptime(f"{datepath}-13", "%Y-%m-%d-%H")
+        except Exception as e:
+            logger.error(e)
+            return
 
-    if selected is not None:
-        datepath = selected
+    if inpath is not None:
+        try:
+            inpath = pathlib.Path(inpath)
+        except Exception as e:
+            logger.errror(e)
+            return
 
-    newargs = kwargs.copy()
-    newargs.update({"inpath": inpath, "datepath": datepath})
+    try:
+        mountpoint = pathlib.Path(mountpoint)
+    except Exception as e:
+        logger.error(e)
+        return
 
-    return (newargs, selected is None)
+    search_st = Status("Searching for matching directories")
+    search_st_cb = StatusCB(start=search_st.start, stop=search_st.stop)
 
+    dir = InputDIR(
+        today=today,
+        date=datepath,
+        inpath=inpath,
+        root=mountpoint,
+        search_cb=search_st_cb,
+    )
 
-def datescore_dir(dir: pathlib.Path, target: datetime) -> int:
-    mtime = datetime.fromtimestamp(os.stat(dir).st_mtime)
-    delta = mtime - target
-    return abs(int(delta.total_seconds()))
+    logger.debug(f"{dir = }")
 
-
-def find_datedir(date: datetime, root: pathlib.Path, n=10) -> List[pathlib.Path]:
-    """Find best matching directories in the root path."""
-    found = []
-
-    for curr, subdns, _ in os.walk(root):
-        # append current directory if none visited
-        if len(found) == 0:
-            found.append((curr, pathlib.Path(curr), datescore_dir(curr, date)))
-
-        # find scores for all sub-directories
-        subdps = [(d, pathlib.Path(curr).joinpath(d).resolve())
-                  for d in subdns]
-        subdss = [(d, p, datescore_dir(p, date)) for d, p in subdps]
-
-        # keep only subdss members that would be in top ten
-        subdss.sort(key=lambda x: x[2])
-        found[:] = found + subdss
-        found.sort(key=lambda x: x[2])
-        found[:] = found[:min(len(found), n)]
-        max_found = found[-1][2]
-        subdss[:] = [(d, s) for d, _, s in subdss if s <= max_found]
-
-        # traverse only subdirectories in subdss (i.e. directories in top ten)
-        subdns[:] = [d for d, _ in subdss]
-
-    found = [str(x[1]) for x in found]
-    return found
-
-
-def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
-    foundstr = [str(x) for x in found]
-    ans = questionary.select(
-        "Best matches:",
-        instruction="Enter to select the desired directory, C-c to cancel",
-        choices=foundstr,
-        show_selected=True
-    ).ask()
-    logger.debug(f"{ans = }")
-    return ans
+    return dir.path
 
 
 def paths_good(kwargs: Dict) -> bool:
