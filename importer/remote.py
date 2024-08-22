@@ -4,37 +4,15 @@ import warnings
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from subprocess import CompletedProcess, run
-from typing import Callable, Optional, Union
+from typing import Optional, Union
+
+from .statuscb import StatusCB
 
 logger = logging.getLogger("importer.remote")
 
 IPAddr = Union[IPv4Address, IPv6Address]
 
 LOCALHOST = ip_address("127.0.0.1")
-
-
-class StatusCB:
-    """Callbacks for displaying a status line during long operations."""
-
-    def NOP():
-        """Do nothing."""
-        return None
-
-    def __init__(self,
-                 start: Callable[[None], None] = NOP,
-                 stop: Callable[[None], None] = NOP
-                 ):
-        """Specify the start and stop callables."""
-        self._start = staticmethod(start)
-        self._stop = staticmethod(stop)
-
-    def start(self):
-        """Call start function."""
-        self._start()
-
-    def stop(self):
-        """Call stop function."""
-        self._stop()
 
 
 class RemoteRepo:

@@ -24,7 +24,8 @@ from rich.progress import Progress, TaskID
 from rich.status import Status
 from rich.style import Style
 
-from .remote import RemoteRepo, StatusCB
+from .remote import RemoteRepo
+from .statuscb import StatusCB
 
 termw = 80
 
@@ -178,9 +179,16 @@ def main(ctx, **kwargs):
     logger.debug(f"{ctx.invoked_subcommand = }")
     logger.debug(f"{kwargs = }")
 
-    remote = build_remote_repo(kwargs)
-    logger.debug(f"{remote = }")
+    remote_repo = build_remote_repo(kwargs)
 
+    with remote_repo as rem:
+        if isinstance(rem, Exception):
+            logger.error(rem)
+            return 1
+
+        logger.debug(f"{rem = }")
+
+    a = 1
     # kwargs = handle_today_arg(kwargs)
     # kwargs, cancelled = handle_datedir(kwargs)
     # logger.debug(f"{cancelled = }")
@@ -286,97 +294,6 @@ def build_remote_repo(kwargs):
         ck_st_cb=ck_st_cb,
         mnt_st_cb=mnt_st_cb,
     )
-
-
-def ping_server(flag: bool, ip: str) -> bool:
-    """Checks server if needed."""
-    localhost = ipaddress.ip_address("127.0.0.1")
-    if ip == localhost and flag is None:
-        warnings.warn(
-            "server-ip is localhost, skipping check. Use --server-check to force.")
-        return True
-    ret = sh.ping(
-        str(ip),
-        "-l3",
-        "-c3",
-        "-W2",
-        _return_cmd=True,
-        _ok_code=[0, 1, 2],
-        _err_to_out=True
-    )
-    if ret.exit_code == 1:
-        logger.error(f"Server at {ip} did not answer.")
-        return False
-
-    if ret.exit_code == 2:
-        logger.error(f"Error while checking server at {ip}:\n{ret}")
-        return False
-
-    try:
-        ret = ret.split("\n")[-3:-1]
-
-        loss_line = ret[0].split(" ")
-        tr = loss_line[0]
-        rec = loss_line[3]
-        loss_str = f"{tr}/{rec} packets received."
-
-        time_line = ret[1].split(" ")
-        times = time_line[3].split("/")
-        tmin = times[0]
-        tmax = times[1]
-        unit = time_line[4][:-1]
-        time_str = f"Ping ({unit}): min {tmin}, max {tmax}"
-
-        logger.info(
-            f"Server check for {ip}:\n\t{loss_str}\n\t{time_str}")
-    except Exception as e:
-        warnings.warn(f"Error while parsing ping response: {e}. Continuing.")
-
-    return True
-
-
-def mount_remote(mountpoint: Optional[str]) -> bool:
-    """Mount remote directory to specified mountpoint."""
-    logger.debug(f"{mountpoint = }")
-    ret = sh.mountpoint(
-        mountpoint,
-        "-q",
-        _return_cmd=True,
-        _ok_code=[0, 32],
-        _err_to_out=True
-    )
-    if ret.exit_code == 0:
-        logger.debug(f"{mountpoint} is already mounted.")
-        return True
-
-    ret = sh.mount(
-        mountpoint,
-        _return_cmd=True,
-        _ok_code=[0, 1, 2, 4, 8, 16, 32, 64],
-        _err_to_out=True
-    )
-
-    if ret.exit_code == 0:
-        return True
-
-    logger.error(ret)
-
-    return False
-
-
-def unmount_remote(mountpoint: Optional[str]):
-    """Try to unmount the remote directory."""
-    if mountpoint is not None:
-        ret = sh.umount(
-            mountpoint,
-            _return_cmd=True,
-            _ok_code=[0, 1, 2, 4, 8, 16, 32, 64]
-        )
-        if ret.exit_code != 0:
-            warnings.warn("Could not unmount the remote directory.")
-        logger.debug(f"Unmounting {mountpoint}: {ret.exit_code = }")
-    else:
-        logger.debug("Skipping unmounting")
 
 
 def validate_dir(dir: str) -> Union[bool, str]:
