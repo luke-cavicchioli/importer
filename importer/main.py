@@ -13,6 +13,7 @@ from collections import namedtuple
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
+from platform import processor
 from typing import Callable, Dict, List, Optional, Union
 
 import click
@@ -199,6 +200,15 @@ def main(ctx, **kwargs):
 
         logger.debug(f"{indir = }")
 
+        outpath = kwargs["outpath"].resolve()
+        repopath = kwargs["repopath"].resolve()
+        if not paths_good(indir, outpath, repopath):
+            return 1
+
+        compress = kwargs["compress"]
+        force = kwargs["force"]
+        ret = process(indir, outpath, repopath, compress, force)
+
     return 0
 
 
@@ -297,20 +307,16 @@ def get_input_directory(kwargs) -> Optional[pathlib.Path]:
     return dir.path
 
 
-def paths_good(kwargs: Dict) -> bool:
+def paths_good(inpath: pathlib.Path, outpath: pathlib.Path, repopath: pathlib.Path) -> bool:
     """Final check for the given input/output paths."""
-    logger.debug(f"{kwargs = }")
-    inpath = pathlib.Path(kwargs["inpath"]).resolve()
     if not inpath.is_dir():
         logger.error(f"Specified input path {inpath} is not a directory.")
         return False
 
-    outpath = kwargs["outpath"]
     if not outpath.is_dir():
         logger.error(f"Specified output path {outpath} is not a directory.")
         return False
 
-    repopath = kwargs["repopath"]
     if not repopath.is_dir():
         logger.error(
             f"Specified repository path {repopath} is not a directory.")
@@ -345,7 +351,24 @@ def add_pbar_copyf(copyf, progress: Progress, task: TaskID):
     return closure
 
 
-def process_files(kwargs: Dict) -> int:
-    """Copy the files to destination."""
-    logger.debug(f"{kwargs = }")
-    return 0
+def process(indir, outpath, repopath, compress, force) -> int:
+    """Process the files to destination."""
+
+    proc = FileProcessor(
+        indir=indir,
+        outpath=outpath,
+        repopath=repopath,
+        compress=compress,
+        force=force,
+    )
+
+    nfiles = proc.count_files()
+    pbar = Progress()
+    ctask = pbar.add_task(total=nfiles)
+
+    def pbar_upd(filename):
+        pbar.update(ctask, description=f"Copying {filename}", advance=1)
+
+    ret = proc.copy(cb=pbar_upd)
+
+    return ret
