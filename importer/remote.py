@@ -48,10 +48,13 @@ class RemoteRepo:
         ck_st_cb:  StatusCB = StatusCB(),
         mnt_st_cb: StatusCB = StatusCB()
     ):
+        """Initialize remote repository manager."""
         self._mountpoint = mountpoint
         if self._mountpoint is None:
             logger.info("No mountpoint specified.")
             self._passthrough = True
+        else:
+            self._passthrough = False
         self._server_ip = ip_address(server_ip)
         self._server_ck = server_ck
         self._ck_st_cb = ck_st_cb
@@ -68,6 +71,7 @@ class RemoteRepo:
         return self._server_ck
 
     def __enter__(self) -> Optional[Union[Path, Exception]]:
+        """Check remote repository and mount it."""
         if self._passthrough:
             return None
 
@@ -95,6 +99,7 @@ class RemoteRepo:
         return self._mountpoint.resolve()
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Unmount the remote repository."""
         logger.debug(
             f"Exiting: {exc_type = }\n{exc_value = }\n{traceback = }")
 
@@ -117,7 +122,7 @@ class RemoteRepo:
 
 
 def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0):
-    """Ping the specified IP address"""
+    """Ping the specified IP address."""
     addrstr = str(addr)
     n = int(npkgs)
     t = float(timeout)
@@ -126,13 +131,13 @@ def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0):
     ret = run(cmd, capture_output=True)
 
     if ret.returncode == 1:
-        msg = f"Server at {ip} did not respond."
+        msg = f"Server at {addrstr} did not respond."
         return (False, msg)
     elif ret.returncode == 2:
-        msg = f"Error while checking server at {ip}:\n{ret.stderr}"
+        msg = f"Error while checking server at {addrstr}:\n{ret.stderr}"
 
     try:
-        msg = parse_ping_res(ret.stdout)
+        msg = parse_ping_res(ret)
         return (True, msg)
     except Exception as e:
         warnings.warn(f"Error while parsing ping response: {e}. Continuing.")
@@ -164,7 +169,7 @@ def parse_ping_res(ret: CompletedProcess) -> str:
 
 def mount_remote(mountpoint: Path) -> tuple[bool, str]:
     """Mount remote directory to specified mountpoint."""
-    logger.debug(f"{mountpoint = }")
+    logger.debug(f"Mounting {mountpoint = }")
     path = str(mountpoint)
 
     ret = run(["mountpoint", path, "-q"], capture_output=True)
@@ -180,7 +185,7 @@ def mount_remote(mountpoint: Path) -> tuple[bool, str]:
 
 def unmount_remote(mountpoint: Path) -> tuple[bool, str]:
     """Unmount specified directory."""
-    logger.debug(f"{mountpoint = }")
+    logger.debug(f"Unmounting {mountpoint = }")
     path = str(mountpoint)
 
     ret = run(["umount", path], capture_output=True)
