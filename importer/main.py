@@ -9,8 +9,11 @@ import sys
 import tempfile
 import warnings
 import zipfile
+from collections import namedtuple
+from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Dict, List, Optional, Union
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Union
 
 import click
 import questionary
@@ -19,7 +22,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, TaskID
 from rich.style import Style
-from thefuzz import fuzz
+
+from .remote import RemoteRepo
 
 termw = 80
 
@@ -30,7 +34,7 @@ log_handler = RichHandler(
     show_path=False,
     show_time=False,
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("importer")
 logger.addHandler(log_handler)
 logging.captureWarnings(True)
 
@@ -51,7 +55,7 @@ CONTEXT_SETTINGS = {
 
 
 def main_handle_errors(mainf):
-    """Stuff to do before and after the main function """
+    """Stuff to do before and after the main function."""
     def f(*args, **kwargs):
         cns.rule("IMPORTER")
         ret = mainf(*args, **kwargs)
@@ -63,6 +67,176 @@ def main_handle_errors(mainf):
         sys.exit(ret)
 
     return f
+
+
+@ click.group(
+    help="Import files from a server.",
+    invoke_without_command=True,
+    context_settings=CONTEXT_SETTINGS,
+)
+@ click.option(
+    "--today",
+    "today",
+    is_flag=True,
+    help="Import from the server a directory with today's date as a name.",
+)
+@ click.option(
+    "-d",
+    "--date",
+    "datepath",
+    default=None,
+    type=str,
+    help="Import from the server a directory with this date as a name.",
+)
+@ click.option(
+    "-i",
+    "--inpath",
+    "inpath",
+    default=None,
+    type=pathlib.Path,
+    help="Import from the server a directory with this name.",
+)
+@ click.option(
+    "-o",
+    "--outpath",
+    "outpath",
+    default="./",
+    type=pathlib.Path,
+    help="Output directory.",
+    show_default=True,
+)
+@ click.option(
+    "-r",
+    "--repopath",
+    "repopath",
+    default="./",
+    type=pathlib.Path,
+    help="Path of data repository",
+    envvar="IMPORTER_REPOPATH",
+    show_envvar=True
+)
+@ click.option(
+    "--mountpoint",
+    "mountpoint",
+    default=None,
+    type=pathlib.Path,
+    help="Mountpoint for remote directory.",
+    envvar="IMPORTER_MOUNTPOINT",
+    show_envvar=True
+)
+@ click.option(
+    "--server-ip",
+    "server_ip",
+    default="127.0.0.1",
+    help="IP to probe to check remote server",
+    envvar="IMPORTER_SERVIP",
+    show_envvar=True,
+    show_default=True,
+)
+@ click.option(
+    "--server-check/--no-server-check",
+    "server_check",
+    is_flag=True,
+    default=None,
+    envvar="IMPORTER_SERVER_CHECK",
+    show_envvar=True,
+    show_default=True,
+    help="Check or skip remote ip."
+)
+@ click.option(
+    "--compress/--no-compress",
+    "compress",
+    is_flag=True,
+    default=None,
+    envvar="IMPORTER_COMPRESS",
+    help="Compress imported folder"
+)
+@ click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    type=int,
+    help="Control verbosity level (repeat to increase).",
+    show_default="WARNING"
+)
+@ click.option(
+    "-f",
+    "--force",
+    "force",
+    is_flag=True,
+    default=False,
+    help="Copy folder even if it already exists at destination"
+)
+@ click.pass_context
+@ main_handle_errors
+def main(ctx, **kwargs):
+    """Program entry point."""
+
+    set_verbosity(kwargs["verbose"])
+
+    logger.debug(f"{ctx.invoked_subcommand = }")
+    logger.debug(f"{kwargs = }")
+
+    mountpoint = kwargs["mountpoint"]
+    server_ip = kwargs["server_ip"]
+
+    # TODO: move to function
+    if mountpoint is not None:
+        try:
+            server_ip = ipaddress.ip_address(server_ip)
+        except ValueError as e:
+            logger.error(f"server_ip value {e}")
+            return 1
+        logger.debug(f"{server_ip = }")
+
+        with cns.status("Checking remote server"):
+            server_ok = ping_server(kwargs["server_check"], server_ip)
+
+        if not server_ok:
+            logger.error("Could not connect to server. Exiting.")
+            return 1
+
+        with cns.status("Mounting remote repository"):
+            mount_remote(mountpoint)
+    else:
+        logger.info("No mountpoint specified.")
+
+    kwargs = handle_today_arg(kwargs)
+    kwargs, cancelled = handle_datedir(kwargs)
+    logger.debug(f"{cancelled = }")
+
+    inpath = kwargs["inpath"]
+    logger.debug(f"{inpath = }")
+    datepath = kwargs["datepath"]
+    logger.debug(f"{datepath = }")
+
+    # If there was no input, Interactively get the input path.
+    # Test for cancelled is needed, as otherwise would want inpath if user
+    # cancels datedir selection with C-c
+    is_inpath_needed = inpath is None and datepath is None and not cancelled
+    if is_inpath_needed:
+        inpath = get_inpath(mountpoint)
+
+    # Put datepath into inpath if there was no inpath given, and datepath was
+    # given
+    is_datepath_selected = inpath is None and datepath is not None
+    if is_datepath_selected:
+        inpath = datepath
+
+    # Because now remote is mounted, return code needs to be given from
+    # process files, otherwise no unmounting.
+    ret = 0
+    if inpath is not None:
+        kwargs["inpath"] = mountpoint.joinpath(inpath)
+        ret = process_files(kwargs)
+    else:
+        logger.error("No input directory selected.")
+        ret = 1
+
+    with cns.status(f"Unmounting {mountpoint}"):
+        unmount_remote(mountpoint)
+
+    return ret
 
 
 def handle_today_arg(kwargs):
@@ -293,6 +467,7 @@ def select_datedir(found: List[pathlib.Path]) -> pathlib.Path:
 
 def paths_good(kwargs: Dict) -> bool:
     """Final check for the given input/output paths."""
+    logger.debug(f"{kwargs = }")
     inpath = pathlib.Path(kwargs["inpath"]).resolve()
     if not inpath.is_dir():
         logger.error(f"Specified input path {inpath} is not a directory.")
@@ -338,231 +513,7 @@ def add_pbar_copyf(copyf, progress: Progress, task: TaskID):
     return closure
 
 
-def do_nothing(*args, **kwargs):
-    """Do nothing function, don't copy anything."""
-    # logger.debug(f"{args =}, {kwargs = }")
-
-
-def copy_tree(
-    inpath: pathlib.Path,
-    destpath: pathlib.Path,
-    selected: List[str],
-    force: bool,
-    copyf=shutil.copy2
-) -> int:
-    """Copy the selected files and folders, display a nice progress bar."""
-
-    nfiles = [0]
-
-    def countfiles(*_):
-        nfiles[0] += 1
-
-    ls = [x.name for x in os.scandir(inpath)]
-    ignored = set(ls) - set(pathlib.Path(x).name for x in selected)
-    ignored.add("*.sis")
-    logger.debug(f"{ignored = }")
-
-    ignore = shutil.ignore_patterns(*ignored)
-
-    tempdir = tempfile.TemporaryDirectory()
-    shutil.copytree(
-        inpath,
-        tempdir.name,
-        copy_function=countfiles,
-        dirs_exist_ok=True,
-        ignore=ignore
-    )
-    tempdir.cleanup()
-
-    nfiles = nfiles[0]
-    logger.debug(f"{nfiles = }")
-
-    with Progress(console=cns, transient=True) as progress:
-        task = progress.add_task("Copying file", total=nfiles)
-
-        nice_copyf = add_pbar_copyf(copyf, progress, task)
-
-        try:
-            shutil.copytree(
-                inpath,
-                destpath,
-                dirs_exist_ok=force,
-                copy_function=nice_copyf,
-                ignore=ignore
-            )
-            pass
-        except FileExistsError as e:
-            logger.error(e)
-            return 1
-
-    cns.print("[bold yellow]Done")
-
-    return 0
-
-
 def process_files(kwargs: Dict) -> int:
     """Copy the files to destination."""
-    return 0
-
-
-@ click.group(
-    help="Import files from a server.",
-    invoke_without_command=True,
-    context_settings=CONTEXT_SETTINGS,
-)
-@ click.option(
-    "--today",
-    "today",
-    is_flag=True,
-    help="Import from the server a directory with today's date as a name.",
-)
-@ click.option(
-    "-d",
-    "--date",
-    "datepath",
-    default=None,
-    type=str,
-    help="Import from the server a directory with this date as a name.",
-)
-@ click.option(
-    "-i",
-    "--inpath",
-    "inpath",
-    default=None,
-    type=pathlib.Path,
-    help="Import from the server a directory with this name.",
-)
-@ click.option(
-    "-o",
-    "--outpath",
-    "outpath",
-    default="./",
-    type=pathlib.Path,
-    help="Output directory.",
-    show_default=True,
-)
-@ click.option(
-    "-r",
-    "--repopath",
-    "repopath",
-    default="./",
-    type=pathlib.Path,
-    help="Path of data repository",
-    envvar="IMPORTER_REPOPATH",
-    show_envvar=True
-)
-@ click.option(
-    "--mountpoint",
-    "mountpoint",
-    default=None,
-    type=pathlib.Path,
-    help="Mountpoint for remote directory.",
-    envvar="IMPORTER_MOUNTPOINT",
-    show_envvar=True
-)
-@ click.option(
-    "--server-ip",
-    "server_ip",
-    default="127.0.0.1",
-    help="IP to probe to check remote server",
-    envvar="IMPORTER_SERVIP",
-    show_envvar=True,
-    show_default=True,
-)
-@ click.option(
-    "--server-check/--no-server-check",
-    "server_check",
-    is_flag=True,
-    default=None,
-    envvar="IMPORTER_SERVER_CHECK",
-    show_envvar=True,
-    show_default=True,
-    help="Check or skip remote ip."
-)
-@ click.option(
-    "--compress/--no-compress",
-    "compress",
-    is_flag=True,
-    default=None,
-    envvar="IMPORTER_COMPRESS",
-    help="Compress imported folder"
-)
-@ click.option(
-    "-v",
-    "--verbose",
-    count=True,
-    type=int,
-    help="Control verbosity level (repeat to increase).",
-    show_default="WARNING"
-)
-@ click.option(
-    "-f",
-    "--force",
-    "force",
-    is_flag=True,
-    default=False,
-    help="Copy folder even if it already exists at destination"
-)
-@ click.pass_context
-@ main_handle_errors
-def main(ctx, **kwargs):
-    """Program entry point."""
-
-    set_verbosity(kwargs["verbose"])
-
-    logger.debug(f"{ctx.invoked_subcommand = }")
     logger.debug(f"{kwargs = }")
-
-    mountpoint = kwargs["mountpoint"]
-    server_ip = kwargs["server_ip"]
-
-    if mountpoint is not None:
-        try:
-            server_ip = ipaddress.ip_address(server_ip)
-        except ValueError as e:
-            logger.error(f"server_ip value {e}")
-            return 1
-        logger.debug(f"{server_ip = }")
-
-        with cns.status("Checking remote server"):
-            server_ok = ping_server(kwargs["server_check"], server_ip)
-
-        if not server_ok:
-            logger.error("Could not connect to server. Exiting.")
-            return 1
-
-        with cns.status("Mounting remote repository"):
-            mount_remote(mountpoint)
-    else:
-        logger.info("No mountpoint specified.")
-
-    kwargs = handle_today_arg(kwargs)
-    kwargs, cancelled = handle_datedir(kwargs)
-
-    inpath = kwargs["inpath"]
-    logger.debug(f"{inpath = }")
-    datepath = kwargs["datepath"]
-    logger.debug(f"{datepath = }")
-    logger.debug(f"{cancelled = }")
-
-    is_inpath_needed = inpath is None and datepath is None and not cancelled
-    if is_inpath_needed:
-        inpath = get_inpath(mountpoint)
-
-    is_datepath_selected = inpath is None and datepath is not None
-    if is_datepath_selected:
-        inpath = datepath
-
-    ret = 0
-    if inpath is not None:
-        kwargs["inpath"] = mountpoint.joinpath(inpath)
-        ret = process_files(kwargs)
-
-    else:
-        logger.error("No input directory selected.")
-        ret = 1
-
-    with cns.status(f"Unmounting {mountpoint}"):
-        unmount_remote(mountpoint)
-
-    return ret
+    return 0
