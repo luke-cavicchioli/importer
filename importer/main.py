@@ -19,11 +19,13 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import click
 import questionary
 import sh
+from rich import box
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, TaskID
 from rich.status import Status
 from rich.style import Style
+from rich.table import Table
 
 from .fileproc import FileProcessor
 from .inputdir import InputDIR
@@ -183,12 +185,12 @@ def main(ctx, **kwargs):
 
     remote_repo = build_remote_repo(kwargs)
     if remote_repo is None:
-        return 1
+        return 121  # EREMOTEIO
 
     with remote_repo as rem:
         if isinstance(rem, Exception):
             logger.error(rem)
-            return 1
+            return 121  # EREMOTEIO
 
         logger.debug(f"{rem = }")
 
@@ -196,14 +198,14 @@ def main(ctx, **kwargs):
 
         if indir is None:
             logger.error("No input directory selected.")
-            return 1
+            return 125  # ECANCELED
 
         logger.debug(f"{indir = }")
 
         outpath = kwargs["outpath"].resolve()
         repopath = kwargs["repopath"].resolve()
         if not paths_good(indir, outpath, repopath):
-            return 1
+            return 2  # ENOENT
 
         compress = kwargs["compress"]
         force = kwargs["force"]
@@ -362,6 +364,9 @@ def process(indir, outpath, repopath, compress, force) -> int:
         ignore_patterns=["*.sis"]
     )
 
+    if not process_confirm(proc):
+        return 125
+
     nfiles = proc.count_files()
     logger.info(f"There are {nfiles} files to process.")
     pbar = Progress(console=cns, transient=True)
@@ -373,6 +378,48 @@ def process(indir, outpath, repopath, compress, force) -> int:
     pbar.start()
     ret = proc(cb=pbar_upd)
     pbar.stop()
-    cns.print("[bold green]Files copied.")
+    cns.print("[bold green]Done.")
 
     return ret
+
+
+def process_confirm(proc: FileProcessor) -> bool:
+    tbl = Table(
+        show_header=False,
+        width=cns.width,
+        box=box.SIMPLE,
+        padding=(0, 0, 0, 0),
+        collapse_padding=True,
+        pad_edge=False
+    )
+    tbl.add_column(justify="left")
+    tbl.add_column(justify="left")
+
+    tbl.add_row("Source", str(proc.src_root), style="green")
+
+    link_dst = proc.link_path
+    dst_root = proc.dst_root
+    if link_dst is None:
+        tbl.add_row("Destination", str(dst_root), style="yellow")
+    else:
+        tbl.add_row("Repo destination", str(dst_root), style="blue")
+        tbl.add_row("Link destination", str(link_dst), style="yellow")
+
+    if proc.compress:
+        tbl.add_row("Method", "Archive of source tree")
+    else:
+        tbl.add_row("Method", "Copy of source tree")
+
+    if proc.force:
+        tbl.add_row("Overwrite", "Yes", style="red")
+    else:
+        tbl.add_row("Overwrite", "No")
+
+    cns.print(tbl)
+
+    ans = questionary.confirm("Confirm?").ask()
+    logger.debug(f"{ans = }")
+    if ans is not None:
+        return ans
+
+    return False

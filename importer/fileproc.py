@@ -6,7 +6,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 logger = logging.getLogger("importer.fileproc")
 
@@ -57,9 +57,32 @@ class FileProcessor:
 
         return n
 
+    @property
+    def src_root(self) -> Path:
+        return self._indir
+
+    @property
+    def dst_root(self) -> Path:
+        return self._repopath.joinpath(self._indir.name)
+
+    @property
+    def link_path(self) -> Optional[Path]:
+        if self._outpath != self._repopath:
+            return self._outpath.joinpath(self._indir.name)
+        else:
+            return None
+
+    @property
+    def compress(self) -> bool:
+        return self._compress
+
+    @property
+    def force(self) -> bool:
+        return self._force
+
     def copy(self, cb: Callable[[str], None]) -> int:
-        src_root = self._indir
-        dst_root = self._repopath.joinpath(src_root.name)
+        src_root = self.src_root
+        dst_root = self.dst_root
         logger.debug(f"{src_root = }\n{dst_root = }")
         try:
             dst_root.mkdir(exist_ok=self._force)
@@ -91,14 +114,14 @@ class FileProcessor:
                 cb(str(description))
                 shutil.copy2(f_src_path, f_dst_path)
 
-        if self._outpath != self._repopath:
-            link_dst = self._outpath.joinpath(src_root.name)
+        link_dst = self.link_path
+        if link_dst is not None:
             logger.info(f"Linking {dst_root} to {link_dst}")
             if link_dst.exists():
                 if self._force:
                     os.remove(link_dst)
                 else:
-                    logger.error("{link_dst} already exists")
+                    logger.error(f"{link_dst} already exists")
                     return 17
             link_dst.symlink_to(dst_root)
         else:
