@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from platform import processor
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import click
 import questionary
@@ -44,8 +44,8 @@ logger.addHandler(log_handler)
 logging.captureWarnings(True)
 
 
-def formatwarning(message, category, filename, lineno, line=None) -> str:
-    """Custom formatting for warnings."""
+def formatwarning(message: str, *_: List[Any]) -> str:
+    """Format warning messages."""
     return str(message)
 
 
@@ -176,7 +176,6 @@ def main_handle_errors(mainf):
 @ main_handle_errors
 def main(ctx, **kwargs):
     """Program entry point."""
-
     set_verbosity(kwargs["verbose"])
 
     logger.debug(f"{ctx.invoked_subcommand = }")
@@ -210,12 +209,14 @@ def main(ctx, **kwargs):
         force = kwargs["force"]
         ret = process(indir, outpath, repopath, compress, force)
 
+        if ret != 0:
+            return ret
+
     return 0
 
 
 def set_verbosity(level: int):
     """Set the correct verbosity level."""
-
     if level <= 0:
         logger.setLevel(logging.WARNING)
     elif level == 1:
@@ -231,7 +232,6 @@ def set_verbosity(level: int):
 
 def build_remote_repo(kwargs) -> Optional[RemoteRepo]:
     """Build the remote repository manager instance."""
-
     mountpoint = kwargs["mountpoint"]
     server_ip = kwargs["server_ip"]
     server_check = kwargs["server_check"]
@@ -241,13 +241,13 @@ def build_remote_repo(kwargs) -> Optional[RemoteRepo]:
             mountpoint = pathlib.Path(mountpoint)
         except Exception as e:
             logger.error(e)
-            return
+            return None
 
     try:
         server_ip = ipaddress.ip_address(server_ip)
     except Exception as e:
         logger.error(e)
-        return
+        return None
 
     ck_status = Status("Checking remote server.")
     ck_st_cb = StatusCB(start=ck_status.start, stop=ck_status.stop)
@@ -266,7 +266,6 @@ def build_remote_repo(kwargs) -> Optional[RemoteRepo]:
 
 def get_input_directory(kwargs) -> Optional[pathlib.Path]:
     """Get the path for the input directory."""
-
     today = kwargs["today"]
     datepath = kwargs["datepath"]
     inpath = kwargs["inpath"]
@@ -277,20 +276,20 @@ def get_input_directory(kwargs) -> Optional[pathlib.Path]:
             datepath = datetime.strptime(f"{datepath}-13", "%Y-%m-%d-%H")
         except Exception as e:
             logger.error(e)
-            return
+            return None
 
     if inpath is not None:
         try:
             inpath = pathlib.Path(inpath)
         except Exception as e:
-            logger.errror(e)
-            return
+            logger.error(e)
+            return None
 
     try:
         mountpoint = pathlib.Path(mountpoint)
     except Exception as e:
         logger.error(e)
-        return
+        return None
 
     search_st = Status("Searching for matching directories")
     search_st_cb = StatusCB(start=search_st.start, stop=search_st.stop)
@@ -309,7 +308,7 @@ def get_input_directory(kwargs) -> Optional[pathlib.Path]:
 
 
 def paths_good(inpath: pathlib.Path, outpath: pathlib.Path, repopath: pathlib.Path) -> bool:
-    """Final check for the given input/output paths."""
+    """Check for the given input/output paths."""
     if not inpath.is_dir():
         logger.error(f"Specified input path {inpath} is not a directory.")
         return False
@@ -354,7 +353,6 @@ def add_pbar_copyf(copyf, progress: Progress, task: TaskID):
 
 def process(indir, outpath, repopath, compress, force) -> int:
     """Process the files to destination."""
-
     proc = FileProcessor(
         indir=indir,
         outpath=outpath,
@@ -366,12 +364,15 @@ def process(indir, outpath, repopath, compress, force) -> int:
 
     nfiles = proc.count_files()
     logger.info(f"There are {nfiles} files to process.")
-    pbar = Progress()
+    pbar = Progress(console=cns, transient=True)
     ctask = pbar.add_task(total=nfiles, description="Processing files:")
 
-    def pbar_upd(filename):
-        pbar.update(ctask, description=f"{filename}", advance=1)
+    def pbar_upd(description: str):
+        pbar.update(ctask, advance=1, description=description)
 
-    ret = proc.copy(cb=pbar_upd)
+    pbar.start()
+    ret = proc(cb=pbar_upd)
+    pbar.stop()
+    cns.print("[bold green]Files copied.")
 
     return ret
