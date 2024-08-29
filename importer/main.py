@@ -4,25 +4,17 @@ import ipaddress
 import logging
 import os
 import pathlib
-import shutil
 import sys
-import tempfile
 import warnings
-import zipfile
-from collections import namedtuple
-from dataclasses import dataclass
-from datetime import date, datetime
-from enum import Enum
-from platform import processor
-from typing import Any, Callable, Dict, List, Optional, Union
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
 import click
 import questionary
-import sh
 from rich import box
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, TaskID
+from rich.progress import Progress
 from rich.status import Status
 from rich.style import Style
 from rich.table import Table
@@ -61,7 +53,7 @@ CONTEXT_SETTINGS = {
 }
 
 
-def main_handle_errors(mainf):
+def main_handle_errors(mainf: Callable):
     """Stuff to do before and after the main function."""
     def f(*args, **kwargs):
         cns.rule("IMPORTER")
@@ -218,7 +210,18 @@ def main(ctx, **kwargs):
 
 
 def set_verbosity(level: int):
-    """Set the correct verbosity level."""
+    """Set the correct verbosity level.
+
+    The verbosity level is overridden if the environment variable
+    "IMPORTER_DEBUG" is set; in this case, the logging level will be DEBUG.
+
+    Values:
+        - 0: WARNING
+        - 1: INFO
+        - 2: DEBUG
+
+    :param level: Verbosity level.
+    """
     if level <= 0:
         logger.setLevel(logging.WARNING)
     elif level == 1:
@@ -232,8 +235,13 @@ def set_verbosity(level: int):
         logger.debug("Logging level set to debug via envvar IMPORTER_DEBUG.")
 
 
-def build_remote_repo(kwargs) -> Optional[RemoteRepo]:
-    """Build the remote repository manager instance."""
+def build_remote_repo(kwargs: Dict) -> Optional[RemoteRepo]:
+    """Build the remote repository manager instance.
+
+    :param kwargs: The keyword arguments to the main function.
+    :return: An instance of RemoteRepo with the required settings if successful,
+        otherwise None
+    """
     mountpoint = kwargs["mountpoint"]
     server_ip = kwargs["server_ip"]
     server_check = kwargs["server_check"]
@@ -267,7 +275,11 @@ def build_remote_repo(kwargs) -> Optional[RemoteRepo]:
 
 
 def get_input_directory(kwargs) -> Optional[pathlib.Path]:
-    """Get the path for the input directory."""
+    """Get the path for the input directory.
+
+    :param kwargs: The keyword arguments to the main function.
+    :return: An instance of Path if the search is successful, otherwise None.
+    """
     today = kwargs["today"]
     datepath = kwargs["datepath"]
     inpath = kwargs["inpath"]
@@ -310,7 +322,13 @@ def get_input_directory(kwargs) -> Optional[pathlib.Path]:
 
 
 def paths_good(inpath: pathlib.Path, outpath: pathlib.Path, repopath: pathlib.Path) -> bool:
-    """Check for the given input/output paths."""
+    """Check for the given input/output paths.
+
+    :param inpath: The input directory path.
+    :param outpath: The path to which the files should be symlinked.
+    :param repopath: The path to which the files should be copied.
+    :return: If the paths are correct (True) or not (False).
+    """
     if not inpath.is_dir():
         logger.error(f"Specified input path {inpath} is not a directory.")
         return False
@@ -327,34 +345,21 @@ def paths_good(inpath: pathlib.Path, outpath: pathlib.Path, repopath: pathlib.Pa
     return True
 
 
-def make_unique_fname(fname: pathlib.Path) -> pathlib.Path:
-    """Append a numerical suffix to render a filename unique."""
-    fname_new = fname
-    i = 1
-    while fname_new.exists() or fname_new.is_symlink():
-        name = str(fname.name)
-        suffixes = ''.join(fname.suffixes)
-        basename = name.replace(suffixes, '')
-        newname = f"{basename}_{i}{suffixes}"
-        fname_new = fname_new.with_name(newname)
-        i += 1
+def process(
+        indir: pathlib.Path,
+        outpath: pathlib.Path,
+        repopath: pathlib.Path,
+        compress: bool,
+        force: bool
+) -> int:
+    """Process the files to destination.
 
-    logger.debug(f"{fname_new = }")
-    return fname_new
-
-
-def add_pbar_copyf(copyf, progress: Progress, task: TaskID):
-    """Add a progressbar to a copying function."""
-    def closure(*args, **kwargs):
-        inname = pathlib.Path(args[0]).name
-        progress.update(task, description=f"Copying {inname}", advance=1)
-        copyf(*args, **kwargs)
-
-    return closure
-
-
-def process(indir, outpath, repopath, compress, force) -> int:
-    """Process the files to destination."""
+    :param indir: The path to the input root directory.
+    :param outpath: The path to the output symlink location.
+    :param repopath: The path to the repository location.
+    :param force: Whether existing files should be overwritten.
+    :return: An exit code, following (as much as possible) errno conventions.
+    """
     proc = FileProcessor(
         indir=indir,
         outpath=outpath,
@@ -384,6 +389,11 @@ def process(indir, outpath, repopath, compress, force) -> int:
 
 
 def process_confirm(proc: FileProcessor) -> bool:
+    """Ask to confirm the processing of files.
+
+    :param proc: The file processor from which the information should be pulled.
+    :return: Whether the user confirmed.
+    """
     tbl = Table(
         show_header=False,
         width=cns.width,

@@ -13,12 +13,18 @@ from zipfile import ZIP_DEFLATED, ZipFile
 logger = logging.getLogger("importer.fileproc")
 
 
-def transplant_path(src: Path, src_root: Path, dst_root: Optional[Path]):
+def transplant_path(src: Path, src_root: Path, dst_root: Optional[Path]) -> Path:
     """
     Transplant the root of an absolute path.
 
     Get the root that src, under src_root, would have had if it were, instead,
     under dst_root.
+
+    :param src: The source path.
+    :param src_root: The root under which the path should be cut.
+    :param dst_root: The root under which the path should be inserted; if None,
+        no insertion will be performed.
+    :return: The transplanted path.
     """
     relp = src.relative_to(src_root.resolve())
     if dst_root is None:
@@ -28,6 +34,16 @@ def transplant_path(src: Path, src_root: Path, dst_root: Optional[Path]):
 
 
 class FileProcessor:
+    """Process files according to settings.
+
+    :param indir: The path of the input directory
+    :param outpath: The path to which the output should symlink
+    :param repopath: The path under which the files will be copied
+    :param compress: Whether to compress the copied files in an archive
+    :param force: Whether the copy should overwrite pre-existing stuff
+    :param ignore_patterns: Globs to ignore for the copy
+    """
+
     def __init__(
             self,
             indir: Path,
@@ -37,6 +53,7 @@ class FileProcessor:
             force: bool,
             ignore_patterns: List[str]
     ):
+        """Initialize processor."""
         self._indir = indir.resolve()
         self._outpath = outpath.resolve()
         self._repopath = repopath.resolve()
@@ -45,6 +62,11 @@ class FileProcessor:
         self._ignore_patterns = ignore_patterns
 
     def __call__(self, cb: Callable[[str], None]) -> int:
+        """Process the files with the required methods.
+
+        :param cb: Callback, called once for each processed file.
+        :return: An error code. Follows errno conventions (as much as possible).
+        """
         if not self._compress:
             logger.info("Files will be copied.")
             return self.copy(cb)
@@ -53,7 +75,10 @@ class FileProcessor:
             return self.archive(cb)
 
     def count_files(self) -> int:
+        """Count the files that will be processed.
 
+        :return: The number of processed files.
+        """
         n = 0
         for _, dns, fns in os.walk(self._indir):
             dns[:] = self._remove_ignored(dns)
@@ -64,10 +89,12 @@ class FileProcessor:
 
     @property
     def src(self) -> Path:
+        """The source directory."""
         return self._indir
 
     @property
     def dst(self) -> Path:
+        """The destination directory or file."""
         dst_root = self._repopath.joinpath(self._indir.name)
         if self.compress:
             return dst_root.with_suffix(".zip")
@@ -76,6 +103,10 @@ class FileProcessor:
 
     @property
     def link_path(self) -> Optional[Path]:
+        """The path for the symlink if needed.
+
+        :return: The symlink path if a symlink is needed, else None.
+        """
         if self._outpath != self._repopath:
             return self._outpath.joinpath(self._indir.name)
         else:
@@ -83,13 +114,20 @@ class FileProcessor:
 
     @property
     def compress(self) -> bool:
+        """Whether to create a compressed archive (True) or not (False)."""
         return self._compress
 
     @property
     def force(self) -> bool:
+        """Overwrite if destination already exists (True) or not (False)."""
         return self._force
 
     def copy(self, cb: Callable[[str], None]) -> int:
+        """Copy the files to destination.
+
+        :param cb: Callback, called once for each processed file.
+        :return: An error code. Follows errno conventions (as much as possible).
+        """
         src_root = self.src
         dst_root = self.dst
         logger.debug(f"{src_root = }\n{dst_root = }")
@@ -105,15 +143,11 @@ class FileProcessor:
             logger.debug(f"{curr = }\n{dst = }")
 
             if dst != dst_root:
-                logger.debug(f"{dst = } != {dst_root = }")
                 try:
                     dst.mkdir(exist_ok=self._force)
                 except FileExistsError as e:
                     logger.error(f"Error while copying files: {e}")
                     return 17
-            else:
-                logger.debug(
-                    "dst == dst_root, skipping creation")
 
             shutil.copystat(curr, dst)
 
@@ -133,6 +167,11 @@ class FileProcessor:
         return 0
 
     def archive(self, cb: Callable[[str], None]) -> int:
+        """Archive the files to a compressed file.
+
+        :param cb: Callback, called once for each processed file.
+        :return: An error code. Follows errno conventions (as much as possible).
+        """
         src_root = self.src
         dst_root = self.dst
         logger.debug(f"{src_root = }\n{dst_root = }")
@@ -178,6 +217,11 @@ class FileProcessor:
         return 0
 
     def _remove_ignored(self, names: Iterable[AnyStr]) -> List[str]:
+        """Remove directories and files that should be ignored.
+
+        :param names: The filenames to filter
+        :return: The filtered filenames
+        """
         ignor: set[str] = set()
         for patt in self._ignore_patterns:
             matchsetd = set(fnmatch.filter(names, patt))
@@ -185,6 +229,7 @@ class FileProcessor:
         return [x for x in names if x not in ignor]
 
     def _symlink(self):
+        """Create a symlink of destination to outpath appropriate."""
         link_dst = self.link_path
         dst_root = self.dst
         if link_dst is not None:

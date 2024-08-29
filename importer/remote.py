@@ -4,7 +4,7 @@ import warnings
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from subprocess import CompletedProcess, run
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 from .statuscb import StatusCB
 
@@ -16,7 +16,16 @@ LOCALHOST = ip_address("127.0.0.1")
 
 
 class RemoteRepo:
-    """Remote repository as context."""
+    """Remote repository as context.
+
+    :param mountpoint: Optional path in which the remote directory should be
+        mounted, defaults to "./".
+    :param server_ip: Ip address to check before mounting, defaults to 127.0.0.1.
+    :param ch_st_cb: StatusCB instance to set the status spinner while checking
+        the remote IP, defaults to StatusCB().
+    :param mnt_st_cb: StatusCB instance to set the status spinner while mounting
+        the remote directory, defaults to StatusCB()
+    """
 
     def __init__(
         self,
@@ -39,6 +48,7 @@ class RemoteRepo:
         self._mnt_st_cb = mnt_st_cb
 
     def _ip_ck_needed(self) -> bool:
+        """If a check of the IP is needed."""
         if self._server_ck is None:
             if self._server_ip == LOCALHOST:
                 logger.info("Server ip is localhost, skipping check.")
@@ -49,7 +59,11 @@ class RemoteRepo:
         return self._server_ck
 
     def __enter__(self) -> Optional[Union[Path, Exception]]:
-        """Check remote repository and mount it."""
+        """Check remote repository and mount it.
+
+        :return: Either an exception if it happened during checking and
+            mounting, or a Path if everything was good.
+        """
         if self._passthrough:
             return None
 
@@ -87,20 +101,40 @@ class RemoteRepo:
         return False
 
     def _ip_ck(self) -> tuple[bool, str]:
+        """Check the IP.
+
+        :return: A tuple containing a bool that indicates the success of the
+            check, and a string with a message.
+        """
         if self._ip_ck_needed():
             return ping(self._server_ip)
         else:
             return (True, "No check was performed")
 
-    def _mnt(self) -> tuple[bool, str]:
+    def _mnt(self) -> Tuple[bool, str]:
+        """Mount the directory.
+
+        :return: A tuple containing a bool that indicates the success of the
+            mount, and a string with a message.
+        """
         return mount_remote(self._mountpoint)
 
-    def _umnt(self) -> tuple[bool, str]:
+    def _umnt(self) -> Tuple[bool, str]:
+        """Unmount the directory.
+
+        :return: A tuple containing a bool that indicates the success of the
+            unmount, and a string with a message.
+        """
         return unmount_remote(self._mountpoint)
 
 
-def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0):
-    """Ping the specified IP address."""
+def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0) -> Tuple[bool, str]:
+    """Ping the specified IP address.
+
+    :param addr: The IP address to ping.
+    :param npkgs: The number of packages to send, defaults to 3.
+    :param timeout: The timeout, in seconds, to wait, defaults to 2.
+    """
     addrstr = str(addr)
     n = int(npkgs)
     t = float(timeout)
@@ -123,7 +157,11 @@ def ping(addr: IPAddr, npkgs: int = 3, timeout: float = 2.0):
 
 
 def parse_ping_res(ret: CompletedProcess) -> str:
-    """Parse the response of the ping command."""
+    """Parse the response of the ping command.
+
+    :param ret: The return value of the subprocess call to ping command.
+    :return: A string representing the ping message. 
+    """
     stdout = ret.stdout.decode("utf-8")
     status_msg = stdout.split("\n")
 
@@ -146,7 +184,12 @@ def parse_ping_res(ret: CompletedProcess) -> str:
 
 
 def mount_remote(mountpoint: Path) -> tuple[bool, str]:
-    """Mount remote directory to specified mountpoint."""
+    """Mount remote directory to specified mountpoint.
+
+    :param mountpoint: The path to which the remote directory will be mounted.
+    :return: A tuple where the first element represents the success of the
+        mounting procedure, and the second a string with a message.
+    """
     logger.debug(f"Mounting {mountpoint = }")
     path = str(mountpoint)
 
@@ -162,7 +205,12 @@ def mount_remote(mountpoint: Path) -> tuple[bool, str]:
 
 
 def unmount_remote(mountpoint: Path) -> tuple[bool, str]:
-    """Unmount specified directory."""
+    """Unmount specified directory.
+
+    :param mountpoint: The path to which the remote directory will be mounted.
+    :return: A tuple where the first element represents the success of the
+        mounting procedure, and the second a string with a message.
+    """
     logger.debug(f"Unmounting {mountpoint = }")
     path = str(mountpoint)
 
