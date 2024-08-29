@@ -162,6 +162,7 @@ CliOption = Union[str, int, bool, None]
     is_flag=True,
     default=None,
     envvar="IMPORTER_COMPRESS",
+    show_envvar=True,
     help="Compress imported folder"
 )
 @ click.option(
