@@ -395,10 +395,10 @@ def process_confirm(proc: FileProcessor) -> bool:
     tbl.add_column(justify="left")
     tbl.add_column(justify="left")
 
-    tbl.add_row("Source", str(proc.src_root), style="green")
+    tbl.add_row("Source", str(proc.src), style="green")
 
     link_dst = proc.link_path
-    dst_root = proc.dst_root
+    dst_root = proc.dst
     if link_dst is None:
         tbl.add_row("Destination", str(dst_root), style="yellow")
     else:
