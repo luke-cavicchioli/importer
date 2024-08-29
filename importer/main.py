@@ -7,7 +7,7 @@ import pathlib
 import sys
 import warnings
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 import click
 import questionary
@@ -38,8 +38,19 @@ logger.addHandler(log_handler)
 logging.captureWarnings(True)
 
 
-def formatwarning(message: str, *_: List[Any]) -> str:
+def formatwarning(
+        message: Warning | str,
+        category: type[Warning],
+        filename: str,
+        lineno: int,
+        line: Optional[str] = None
+) -> str:
     """Format warning messages."""
+    # Call each name not to have unused variables.
+    category
+    filename
+    lineno
+    line
     return str(message)
 
 
@@ -53,9 +64,9 @@ CONTEXT_SETTINGS = {
 }
 
 
-def main_handle_errors(mainf: Callable):
+def main_handle_errors(mainf: Callable[[Any], Any]) -> Any:
     """Stuff to do before and after the main function."""
-    def f(*args, **kwargs):
+    def f(*args: Any, **kwargs: Any) -> Any:
         cns.rule("IMPORTER")
         ret = mainf(*args, **kwargs)
         cns.rule(
@@ -66,6 +77,9 @@ def main_handle_errors(mainf: Callable):
         sys.exit(ret)
 
     return f
+
+
+CliOption = Union[str, int, bool, None]
 
 
 @ click.group(
@@ -168,7 +182,7 @@ def main_handle_errors(mainf: Callable):
 )
 @ click.pass_context
 @ main_handle_errors
-def main(ctx, **kwargs):
+def main(ctx: Any, **kwargs: CliOption) -> int:
     """Program entry point."""
     set_verbosity(kwargs["verbose"])
 
@@ -274,7 +288,7 @@ def build_remote_repo(kwargs: Dict) -> Optional[RemoteRepo]:
     )
 
 
-def get_input_directory(kwargs) -> Optional[pathlib.Path]:
+def get_input_directory(kwargs: Dict[str, CliOption]) -> Optional[pathlib.Path]:
     """Get the path for the input directory.
 
     :param kwargs: The keyword arguments to the main function.
