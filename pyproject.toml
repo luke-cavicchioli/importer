@@ -9,7 +9,7 @@ authors = [
 ]
 description = "Import experimental files from remote computer"
 readme = "README.md"
-requires-python = ">=3.11.7"
+requires-python = ">=3.11"
 dependencies = [
     "sh",
     "click",
