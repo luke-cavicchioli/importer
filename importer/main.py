@@ -411,9 +411,9 @@ def process_confirm(proc: FileProcessor) -> bool:
         tbl.add_row("Method", "Copy of source tree")
 
     if proc.force:
-        tbl.add_row("Overwrite", "Yes", style="red")
+        tbl.add_row("Force", "Yes", style="red")
     else:
-        tbl.add_row("Overwrite", "No")
+        tbl.add_row("Force", "No")
 
     cns.print(tbl)
 

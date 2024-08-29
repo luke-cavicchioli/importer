@@ -6,7 +6,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import AnyStr, Callable, Iterable, List, Optional
 
 logger = logging.getLogger("importer.fileproc")
 
@@ -133,7 +133,7 @@ class FileProcessor:
     def archive(self, cb: Callable[[str], None]) -> int:
         return 0
 
-    def _remove_ignored(self, names) -> List[str]:
+    def _remove_ignored(self, names: Iterable[AnyStr]) -> List[str]:
         ignor: set[str] = set()
         for patt in self._ignore_patterns:
             matchsetd = set(fnmatch.filter(names, patt))
