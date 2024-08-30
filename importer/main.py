@@ -64,21 +64,6 @@ CONTEXT_SETTINGS = {
 }
 
 
-def main_handle_errors(mainf: Callable[[Any], Any]) -> Any:
-    """Stuff to do before and after the main function."""
-    def f(*args: Any, **kwargs: Any) -> Any:
-        cns.rule("IMPORTER")
-        ret = mainf(*args, **kwargs)
-        cns.rule(
-            style=Style(
-                color="red" if ret != 0 else "green"
-            )
-        )
-        sys.exit(ret)
-
-    return f
-
-
 CliOption = Union[str, int, bool, None]
 
 
@@ -182,14 +167,60 @@ CliOption = Union[str, int, bool, None]
     help="Copy folder even if it already exists at destination"
 )
 @ click.pass_context
-@ main_handle_errors
 def main(ctx: Any, **kwargs: CliOption) -> int:
     """Program entry point."""
     set_verbosity(kwargs["verbose"])
 
+    cns.rule("IMPORTER")
+
     logger.debug(f"{ctx.invoked_subcommand = }")
     logger.debug(f"{kwargs = }")
 
+    ret = 0
+    try:
+        ret = imprtf(kwargs)
+    except Exception as e:
+        logger.error(f"Uncaught error: {e}")
+        ret = 55
+    except KeyboardInterrupt:
+        logger.error("Interrupted by user")
+        ret = 125
+
+    if ret == 0:
+        cns.rule()
+    else:
+        cns.rule(style="red")
+
+    return ret
+
+
+def set_verbosity(level: int):
+    """Set the correct verbosity level.
+
+    The verbosity level is overridden if the environment variable
+    "IMPORTER_DEBUG" is set; in this case, the logging level will be DEBUG.
+
+    Values:
+        - 0: WARNING
+        - 1: INFO
+        - 2: DEBUG
+
+    :param level: Verbosity level.
+    """
+    if level <= 0:
+        logger.setLevel(logging.WARNING)
+    elif level == 1:
+        logger.setLevel(logging.INFO)
+    elif level >= 2:
+        logger.setLevel(logging.DEBUG)
+
+    # overrides cli flag
+    if "IMPORTER_DEBUG" in os.environ.keys():
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Logging level set to debug via envvar IMPORTER_DEBUG.")
+
+
+def imprtf(kwargs: Dict["str", CliOption]):
     remote_repo = build_remote_repo(kwargs)
     if remote_repo is None:
         return 121  # EREMOTEIO
@@ -222,32 +253,6 @@ def main(ctx: Any, **kwargs: CliOption) -> int:
             return ret
 
     return 0
-
-
-def set_verbosity(level: int):
-    """Set the correct verbosity level.
-
-    The verbosity level is overridden if the environment variable
-    "IMPORTER_DEBUG" is set; in this case, the logging level will be DEBUG.
-
-    Values:
-        - 0: WARNING
-        - 1: INFO
-        - 2: DEBUG
-
-    :param level: Verbosity level.
-    """
-    if level <= 0:
-        logger.setLevel(logging.WARNING)
-    elif level == 1:
-        logger.setLevel(logging.INFO)
-    elif level >= 2:
-        logger.setLevel(logging.DEBUG)
-
-    # overrides cli flag
-    if "IMPORTER_DEBUG" in os.environ.keys():
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Logging level set to debug via envvar IMPORTER_DEBUG.")
 
 
 def build_remote_repo(kwargs: Dict) -> Optional[RemoteRepo]:
