@@ -4,10 +4,9 @@ import ipaddress
 import logging
 import os
 import pathlib
-import sys
 import warnings
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import click
 import questionary
@@ -16,7 +15,6 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress
 from rich.status import Status
-from rich.style import Style
 from rich.table import Table
 
 from .fileproc import FileProcessor
@@ -221,6 +219,10 @@ def set_verbosity(level: int):
 
 
 def imprtf(kwargs: Dict["str", CliOption]):
+    """Import the files.
+
+    :param kwargs: The keyword arguments from the main function.
+    """
     remote_repo = build_remote_repo(kwargs)
     if remote_repo is None:
         return 121  # EREMOTEIO
