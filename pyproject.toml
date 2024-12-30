@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "importer"
+dynamic = ["version"]
+authors = [
+    { name = "Luca Cavicchioli"}
+]
+description = "File importer script"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "pip-tools",
+    "pydantic",
+    "pydrive2[fsspec]",
+    "rich"
+]
