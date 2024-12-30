@@ -1,5 +1,9 @@
 """Main function."""
 
+from pydantic_settings import CliApp
+
+from .cli import App
+
 
 def main():
-    print("Hello, world!")
+    CliApp.run(App)

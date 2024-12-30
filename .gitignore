@@ -176,3 +176,4 @@ cython_debug/
 
 # requirements file
 requirements.txt
+testdata
