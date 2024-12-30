@@ -17,3 +17,9 @@ dependencies = [
     "pydrive2[fsspec]",
     "rich"
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+importer = "importer.main:main"
